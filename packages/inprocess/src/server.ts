@@ -115,12 +115,24 @@ async function wireCapabilities(db: OvdbDatabase): Promise<Readonly<Record<strin
   };
 }
 
-/** Reads a body chunk by chunk and stops as soon as it passes the limit. */
-async function readBody(request: Request, limit: number, what?: string): Promise<string> {
+/**
+ * Reads a body and stops as soon as it passes the limit. A streaming body is read chunk by chunk;
+ * a request without a `body` stream (Firefox leaves `Request.body` undefined) is read whole with
+ * arrayBuffer() and checked afterwards, after the Content-Length check.
+ * @internal
+ */
+export async function readBody(request: Request, limit: number, what?: string): Promise<string> {
   const declared = Number(request.headers.get("Content-Length"));
   if (declared > limit) throw payloadTooLarge(limit, what);
-  if (request.body === null) return "";
-  const reader = request.body.getReader();
+  // A missing stream is `null` per spec and `undefined` where Request.body is not implemented.
+  const stream = (request as { body?: ReadableStream<Uint8Array> | null }).body;
+  if (stream === null) return "";
+  if (stream === undefined) {
+    const bytes = await request.arrayBuffer();
+    if (bytes.byteLength > limit) throw payloadTooLarge(limit, what);
+    return new TextDecoder().decode(bytes);
+  }
+  const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (;;) {
@@ -137,7 +149,8 @@ async function readBody(request: Request, limit: number, what?: string): Promise
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join("") + decoder.decode();
 }
 
-async function readJsonBody(request: Request, limit: number): Promise<unknown> {
+/** @internal */
+export async function readJsonBody(request: Request, limit: number): Promise<unknown> {
   const text = await readBody(request, limit);
   try {
     return JSON.parse(text) as unknown;

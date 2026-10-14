@@ -6,3 +6,4 @@ export {
   type LocalState,
   type OvdbDatabase,
 } from "./server.js";
+export { fetchOverPort, serveFetchOverPort, type FetchPort } from "./port.js";

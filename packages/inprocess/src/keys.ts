@@ -16,6 +16,14 @@ export function validateSegment(segment: string): void {
   }
 }
 
+const dangerousCollections: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
+
+/** A collection name: a valid segment that cannot reach Object.prototype in an adapter that keeps records in plain objects. */
+export function validateCollection(name: string): void {
+  validateSegment(name);
+  if (dangerousCollections.has(name)) throw invalidKey(`invalid key: collection ${JSON.stringify(name)} is not allowed`);
+}
+
 /**
  * Parses a dal-escaped key path ("collection/id[/sub/id...]") as the Go server
  * does: split on "/", percent-unescape each segment, then validate it.
@@ -31,7 +39,7 @@ export function parseKeyPath(raw: string): Key<string> {
   if (segments.length < 2 || segments.length % 2 !== 0) {
     throw invalidKey(`invalid key: key must have an even number of segments (collection/id pairs), got ${segments.length.toString()}`);
   }
-  segments.forEach(validateSegment);
+  segments.forEach((segment, index) => { if (index % 2 === 0) validateCollection(segment); else validateSegment(segment); });
   let key: Key<string> | undefined;
   for (let index = 0; index < segments.length; index += 2) {
     key = newKey(segments[index] as string, segments[index + 1] as string, key);

@@ -15,21 +15,43 @@ export interface WireUpdate {
 /** Keys that would reach Object.prototype or a constructor through a request-controlled path. */
 const dangerousSegments: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
 
+/** The deepest nesting of a record body, update value or DTQL document, and the longest field path. */
+export const maxNesting = 256;
+
 /**
  * Refuses a record body or update value holding an own `__proto__` key at any
- * depth. JSON.parse creates such keys as own properties; spread, assign and
- * some storage adapters would turn them into prototype writes.
+ * depth, or nested deeper than maxNesting. JSON.parse creates such keys as own
+ * properties; spread, assign and some storage adapters would turn them into
+ * prototype writes. It walks with an explicit stack, so a pathological depth
+ * is refused instead of overflowing the call stack.
  */
 export function rejectProtoKeys(value: unknown, context: string): void {
-  if (Array.isArray(value)) {
-    for (const item of value) rejectProtoKeys(item, context);
-    return;
+  const stack: [unknown, number][] = [[value, 1]];
+  for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
+    const [node, depth] = entry;
+    if (!Array.isArray(node) && !isObject(node)) continue;
+    if (depth > maxNesting) throw badRequest(`${context}: nesting too deep`);
+    if (Array.isArray(node)) {
+      for (const item of node as unknown[]) stack.push([item, depth + 1]);
+      continue;
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === "__proto__") throw badRequest(`${context}: field name "__proto__" is not allowed`);
+      stack.push([child, depth + 1]);
+    }
   }
-  if (!isObject(value)) return;
-  for (const [key, child] of Object.entries(value)) {
-    if (key === "__proto__") throw badRequest(`${context}: field name "__proto__" is not allowed`);
-    rejectProtoKeys(child, context);
+}
+
+/** Whether a parsed document nests arrays or objects deeper than maxNesting (an explicit stack, no recursion). */
+export function nestsTooDeep(value: unknown): boolean {
+  const stack: [unknown, number][] = [[value, 1]];
+  for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
+    const [node, depth] = entry;
+    if (typeof node !== "object" || node === null) continue;
+    if (depth > maxNesting) return true;
+    for (const child of Object.values(node)) stack.push([child, depth + 1]);
   }
+  return false;
 }
 
 function setOwn(target: Data, key: string, value: unknown): void {
@@ -49,6 +71,9 @@ function updatePath(update: WireUpdate, index: number): readonly string[] {
   const byPath = Array.isArray(update.fieldPath) && update.fieldPath.length > 0;
   if (byName && byPath) throw badRequest(`update ${index.toString()}: fieldName and fieldPath are mutually exclusive`);
   if (!byName && !byPath) throw badRequest(`update ${index.toString()}: one of fieldName or fieldPath is required`);
+  if (byPath && (update.fieldPath as readonly unknown[]).length > maxNesting) {
+    throw badRequest(`update ${index.toString()}: field path nesting too deep`);
+  }
   const path: readonly unknown[] = byName ? [update.fieldName] : update.fieldPath as readonly unknown[];
   if (!path.every((segment): segment is string => typeof segment === "string" && segment !== "")) {
     throw badRequest(`update ${index.toString()}: empty field path segment`);

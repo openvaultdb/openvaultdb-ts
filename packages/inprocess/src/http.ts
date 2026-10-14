@@ -4,9 +4,11 @@ import { AlreadyExistsError, NotFoundError, UnsupportedError } from "@dalgo/core
 export class OvdbHttpError extends Error {
   public readonly status: number;
   public readonly code: string;
+  public readonly headers: Readonly<Record<string, string>>;
 
-  public constructor(status: number, code: string, message: string) {
+  public constructor(status: number, code: string, message: string, headers: Readonly<Record<string, string>> = {}) {
     super(message);
+    this.headers = headers;
     this.name = "OvdbHttpError";
     this.status = status;
     this.code = code;
@@ -25,10 +27,10 @@ export const readOnly = (): OvdbHttpError => new OvdbHttpError(403, "read_only",
 
 const noStore = { "Cache-Control": "no-store" } as const;
 
-export function jsonResponse(value: unknown, status = 200): Response {
+export function jsonResponse(value: unknown, status = 200, headers: Readonly<Record<string, string>> = {}): Response {
   return new Response(JSON.stringify(value), {
     status,
-    headers: { "Content-Type": "application/json", ...noStore },
+    headers: { "Content-Type": "application/json", ...noStore, ...headers },
   });
 }
 
@@ -37,7 +39,7 @@ export function emptyResponse(status: number): Response {
 }
 
 export function errorResponse(error: OvdbHttpError): Response {
-  return jsonResponse({ error: { code: error.code, message: error.message } }, error.status);
+  return jsonResponse({ error: { code: error.code, message: error.message } }, error.status, error.headers);
 }
 
 function hasCode(error: object, pattern: RegExp): boolean {

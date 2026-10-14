@@ -1,0 +1,13 @@
+packages:
+  - "packages/*"
+
+# DEV LINKS: unreleased sibling checkouts, resolved relative to this file. They
+# hold in both the canonical layout (~/projects/<org>/<repo>) and a WB task
+# worktree (<task>/github.com/<org>/<repo>). Swap them before landing:
+# - @dalgo/core: drop the override once @dalgo/core 0.8.0 (capabilities.ts)
+#   is published, or pin "github:dal-go/dalgo-js#<pushed sha>".
+# - @dalgo/ovdb: its CRUD client (OpenVaultDbDatabase) is not in the published
+#   0.2.0 artifact; the contract tests need it from source.
+overrides:
+  "@dalgo/core": "link:../../dal-go/dalgo-js"
+  "@dalgo/ovdb": "link:../../dal-go/dalgo-http-adapters/packages/ovdb"

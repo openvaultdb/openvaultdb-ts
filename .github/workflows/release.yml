@@ -1,0 +1,66 @@
+name: Release packages
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-packages
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Version pull request or publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - name: Open the version pull request, or publish unreleased versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          set -euo pipefail
+          changeset=$(find .changeset -maxdepth 1 -type f -name '*.md' ! -name README.md -print -quit)
+          if [[ -n "$changeset" ]]; then
+            pnpm release:version
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git checkout -B changeset-release/main
+            git add --all
+            git commit -m 'chore: version packages'
+            git push --force origin HEAD:refs/heads/changeset-release/main
+            pr=$(gh pr list --base main --head changeset-release/main --state open --json number --jq '.[0].number // empty')
+            if [[ -z "$pr" ]]; then
+              gh pr create --base main --head changeset-release/main \
+                --title 'chore: version packages' \
+                --body 'Automated Changesets version pull request.'
+            fi
+            exit 0
+          fi
+          for manifest in packages/*/package.json; do
+            name=$(jq -r '.name' "$manifest")
+            version=$(jq -r '.version' "$manifest")
+            if [[ "$(jq -r '.private // false' "$manifest")" == "true" || "$version" == "0.0.0" ]]; then
+              continue
+            fi
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              continue
+            fi
+            pnpm --filter "$name" publish --access public --no-git-checks
+          done

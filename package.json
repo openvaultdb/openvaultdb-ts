@@ -1,0 +1,23 @@
+{
+  "name": "@openvaultdb/openvaultdb-ts",
+  "private": true,
+  "version": "0.0.0",
+  "description": "TypeScript packages for OpenVaultDB",
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present run build",
+    "check": "pnpm -r --if-present run check",
+    "lint": "pnpm -r --if-present run lint",
+    "test": "pnpm -r --if-present run test",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "changeset": "changeset",
+    "release:version": "changeset version"
+  },
+  "devDependencies": {
+    "@changesets/cli": "3.0.3"
+  }
+}

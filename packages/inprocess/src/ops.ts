@@ -1,7 +1,7 @@
 import { AlreadyExistsError, NotFoundError, type Database, type Key } from "@dalgo/core";
 import { badRequest, invalidKey } from "./http.js";
 import { parseKeyPath } from "./keys.js";
-import { applyUpdates, isObject, type WireUpdate } from "./updates.js";
+import { applyUpdates, isObject, rejectProtoKeys, type WireUpdate } from "./updates.js";
 
 type Data = Record<string, unknown>;
 
@@ -34,6 +34,7 @@ export function parseBatch(body: unknown): readonly WriteOp[] {
       throw badRequest(`op ${index.toString()}: unknown op ${JSON.stringify(raw.op)}`);
     }
     if (raw.data !== undefined && !isObject(raw.data)) throw badRequest(`op ${index.toString()}: data must be an object`);
+    if (raw.data !== undefined) rejectProtoKeys(raw.data, `op ${index.toString()}`);
     if (raw.updates !== undefined && !Array.isArray(raw.updates)) throw badRequest(`op ${index.toString()}: updates must be an array`);
     return {
       op: raw.op as OpName,

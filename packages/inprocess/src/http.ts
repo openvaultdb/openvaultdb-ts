@@ -17,6 +17,10 @@ export const badRequest = (message: string): OvdbHttpError => new OvdbHttpError(
 export const invalidKey = (message: string): OvdbHttpError => new OvdbHttpError(400, "invalid_key", message);
 export const invalidDtql = (message: string): OvdbHttpError => new OvdbHttpError(400, "invalid_dtql", message);
 export const notFound = (message: string): OvdbHttpError => new OvdbHttpError(404, "not_found", message);
+export const payloadTooLarge = (limit: number): OvdbHttpError =>
+  new OvdbHttpError(413, "payload_too_large", `request body exceeds ${limit.toString()} bytes`);
+/** No Go equivalent exists: ovdb serve has no per-database read denial, so this server names it read_denied. */
+export const readDenied = (): OvdbHttpError => new OvdbHttpError(403, "read_denied", "reads are not allowed on this database");
 export const readOnly = (): OvdbHttpError => new OvdbHttpError(403, "read_only", "server is read-only");
 
 const noStore = { "Cache-Control": "no-store" } as const;

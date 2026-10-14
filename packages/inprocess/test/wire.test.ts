@@ -343,12 +343,12 @@ describe("api.md#query: POST|GET /v1/databases/{db}/query", () => {
     });
   }
 
-  it("400 bad_request for a GET without one q, a q that is not JSON, or a body over 1 MiB", async () => {
-    const call = caller({ databases: { demo: seeded() } });
+  it("400 bad_request for a GET without one q, a q that is not JSON, or a body over the limit (413)", async () => {
+    const call = caller({ databases: { demo: seeded() }, maxBodyBytes: 1024 });
     expect(await call("GET", "/v1/databases/demo/query")).toMatchObject({ status: 400, body: refusal("bad_request") });
     expect(await call("GET", "/v1/databases/demo/query?q=%7B")).toMatchObject({ status: 400, body: refusal("bad_request") });
-    const big = JSON.stringify({ collection: "users", pad: "x".repeat(1 << 20) });
-    expect(await call("POST", "/v1/databases/demo/query", big)).toMatchObject({ status: 400, body: refusal("bad_request") });
+    const big = JSON.stringify({ collection: "users", pad: "x".repeat(1024) });
+    expect(await call("POST", "/v1/databases/demo/query", big)).toMatchObject({ status: 413, body: refusal("payload_too_large") });
   });
 
   it("501 query_unsupported for a database whose capabilities say query:false", async () => {

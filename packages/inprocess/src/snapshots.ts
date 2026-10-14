@@ -44,14 +44,23 @@ function newId(): string {
  */
 export class SnapshotStore {
   readonly #snapshots = new Map<string, Snapshot>();
+  #reserved = 0;
 
-  /** Reserves a slot before the capture runs, so a full store refuses before reading. */
-  public reserve(): void {
+  /**
+   * Reserves a slot before the capture runs, so a full store refuses before
+   * reading and concurrent first pages cannot overshoot the cap. The returned
+   * release function frees the reservation once the capture ended or failed.
+   */
+  public reserve(): () => void {
     const now = Date.now();
     for (const [id, snapshot] of this.#snapshots) if (snapshot.expiresAt <= now) this.#snapshots.delete(id);
-    if (this.#snapshots.size >= maxSnapshots) {
+    if (this.#snapshots.size + this.#reserved >= maxSnapshots) {
       throw new OvdbHttpError(503, "snapshot_capacity", "too many active query snapshots");
     }
+    this.#reserved += 1;
+    return () => {
+      this.#reserved -= 1;
+    };
   }
 
   public capture(scope: SnapshotScope, rows: readonly Row[]): SnapshotPage {

@@ -195,10 +195,10 @@ describe("api.md#dtql: request forms and parameters", () => {
     expect(await response.json()).toMatchObject({ records: [{ key: "people/p1" }] });
   });
 
-  it("POST: 400 bad_request for an empty body or one over 1 MiB", async () => {
-    const call = caller({ databases: { demo: people() } });
+  it("POST: 400 bad_request for an empty body, 413 payload_too_large over the body limit", async () => {
+    const call = caller({ databases: { demo: people() }, maxBodyBytes: 1024 });
     expect(await call("POST", path, "")).toMatchObject({ status: 400, body: refusal("bad_request") });
-    expect(await call("POST", path, `from: {name: people}\n#${"x".repeat(1 << 20)}`)).toMatchObject({ status: 400, body: refusal("bad_request") });
+    expect(await call("POST", path, `from: {name: people}\n#${"x".repeat(1024)}`)).toMatchObject({ status: 413, body: refusal("payload_too_large") });
   });
 
   it("GET: 400 bad_request for a missing or repeated q, another parameter, or bad parameters; 414 over 8 KiB", async () => {

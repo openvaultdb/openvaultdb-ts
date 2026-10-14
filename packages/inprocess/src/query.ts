@@ -26,7 +26,21 @@ function prefixed<T>(prefix: string, parse: () => T): T {
 
 function field(value: unknown, context: string): string {
   if (typeof value !== "string" || value === "") throw badRequest(`${context}: field is required`);
+  if (value === "__proto__") throw badRequest(`${context}: field name "__proto__" is not allowed`);
   return value;
+}
+
+const isScalar = (value: unknown): boolean => typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+
+/** Checks the operand of a where entry has the shape its operator needs. */
+function operand(op: QueryOperator, value: unknown, context: string): void {
+  if (op === "in" || op === "array-contains-any") {
+    if (!Array.isArray(value) || !value.every(isScalar)) throw badRequest(`${context}: operator ${op} needs an array of scalars`);
+  } else if (op === "==") {
+    if (value !== null && !isScalar(value)) throw badRequest(`${context}: operator == needs a scalar or null`);
+  } else if (!isScalar(value)) {
+    throw badRequest(`${context}: operator ${op} needs a scalar`);
+  }
 }
 
 /** A /query body (docs/api.md, "Query") as a DALgo structured query. */
@@ -55,6 +69,7 @@ export function parseWireQuery(body: unknown): WireQuery {
     if (typeof filter.op !== "string" || !wireOperators.has(filter.op)) {
       throw badRequest(`unsupported operator ${JSON.stringify(filter.op)}`);
     }
+    operand(filter.op as QueryOperator, filter.value, `where[${index.toString()}]`);
     return { field: name, operator: filter.op as QueryOperator, value: filter.value };
   });
   const orders = (orderBy ?? []).map((raw: unknown, index): QueryOrder<Data> => {

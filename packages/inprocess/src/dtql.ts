@@ -106,6 +106,7 @@ function plainField(value: unknown, context: string): string {
   if (!Object.hasOwn(value, "field")) relational();
   if (Object.keys(value).length !== 1) throw invalidDtql(`unsupported ${context} key`);
   if (typeof value.field !== "string" || value.field === "") throw invalidDtql(`${context}.field must be a non-empty string`);
+  if (value.field === "__proto__") throw invalidDtql(`${context}.field "__proto__" is not allowed`);
   return value.field;
 }
 

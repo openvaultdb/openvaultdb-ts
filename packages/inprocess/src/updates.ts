@@ -12,6 +12,34 @@ export interface WireUpdate {
   readonly serverTimestamp?: unknown;
 }
 
+/** Keys that would reach Object.prototype or a constructor through a request-controlled path. */
+const dangerousSegments: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
+
+/**
+ * Refuses a record body or update value holding an own `__proto__` key at any
+ * depth. JSON.parse creates such keys as own properties; spread, assign and
+ * some storage adapters would turn them into prototype writes.
+ */
+export function rejectProtoKeys(value: unknown, context: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) rejectProtoKeys(item, context);
+    return;
+  }
+  if (!isObject(value)) return;
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "__proto__") throw badRequest(`${context}: field name "__proto__" is not allowed`);
+    rejectProtoKeys(child, context);
+  }
+}
+
+function setOwn(target: Data, key: string, value: unknown): void {
+  Object.defineProperty(target, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
+function getOwn(target: Data, key: string): unknown {
+  return Object.hasOwn(target, key) ? target[key] : undefined;
+}
+
 export function isObject(value: unknown): value is Data {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -25,6 +53,8 @@ function updatePath(update: WireUpdate, index: number): readonly string[] {
   if (!path.every((segment): segment is string => typeof segment === "string" && segment !== "")) {
     throw badRequest(`update ${index.toString()}: empty field path segment`);
   }
+  const forbidden = path.find((segment) => dangerousSegments.has(segment));
+  if (forbidden !== undefined) throw badRequest(`update ${index.toString()}: field path segment ${JSON.stringify(forbidden)} is not allowed`);
   return path;
 }
 
@@ -32,15 +62,15 @@ function updatePath(update: WireUpdate, index: number): readonly string[] {
 function parentAt(data: Data, path: readonly string[], create: boolean): Data | undefined {
   let current = data;
   for (const segment of path.slice(0, -1)) {
-    const child = current[segment];
+    const child = getOwn(current, segment);
     if (child === undefined || child === null) {
       if (!create) return undefined;
-      current[segment] = {};
+      setOwn(current, segment, {});
     } else if (!isObject(child)) {
       if (!create) return undefined;
       throw badRequest(`field path segment ${JSON.stringify(segment)} is not an object`);
     }
-    current = current[segment] as Data;
+    current = getOwn(current, segment) as Data;
   }
   return current;
 }
@@ -58,19 +88,20 @@ export function applyUpdates(data: Readonly<Data>, updates: readonly WireUpdate[
       return;
     }
     if (update.serverTimestamp === true) {
-      (parentAt(result, path, true) as Data)[leaf] = now.toISOString();
+      setOwn(parentAt(result, path, true) as Data, leaf, now.toISOString());
       return;
     }
     if (update.transform === "increment") {
       if (typeof update.value !== "number") throw badRequest(`update ${index.toString()}: increment value must be a number`);
       const parent = parentAt(result, path, true) as Data;
-      const current = parent[leaf] ?? 0;
+      const current = getOwn(parent, leaf) ?? 0;
       if (typeof current !== "number") throw badRequest(`update ${index.toString()}: cannot increment non-numeric field ${JSON.stringify(leaf)}`);
-      parent[leaf] = current + update.value;
+      setOwn(parent, leaf, current + update.value);
       return;
     }
     if (update.transform !== undefined) throw badRequest(`update ${index.toString()}: unknown transform ${JSON.stringify(update.transform)}`);
-    (parentAt(result, path, true) as Data)[leaf] = update.value;
+    rejectProtoKeys(update.value, `update ${index.toString()}`);
+    setOwn(parentAt(result, path, true) as Data, leaf, update.value);
   });
   return result;
 }

@@ -40,6 +40,10 @@ allowBuilds:
   '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56#path:/packages/ovdb': true
 ```
 
+pnpm records no integrity hash for a GitHub tarball, so these pins are
+trusted by their full commit SHA and the HTTPS download alone. That is
+accepted until both packages are published to npm, when the pins go.
+
 ## Capabilities
 
 The database descriptor (`GET /v1/databases/{db}`) and discovery
@@ -77,6 +81,18 @@ constraint the adapter refuses is `409 constraint_violation`, and
 `UnsupportedError` is `422 not_supported`. A relational DTQL document is
 `422 join_engine_unsupported`.
 
+Beyond the Go server's behaviour, this server also:
+
+- refuses a request body over `maxBodyBytes` (default 8 MiB) with
+  `413 payload_too_large`, while reading it;
+- answers `403 read_denied` for reads (record `GET`/`HEAD`, query, DTQL) of a
+  database whose capabilities say `read: false` (`ovdb serve` has no such
+  denial, so the code is this server's own);
+- refuses field paths through `__proto__`, `constructor` or `prototype`, and
+  record bodies or update values holding a `__proto__` key, with
+  `400 bad_request`, so a request cannot reach `Object.prototype`;
+- answers `HEAD` on `GET` routes with the status and headers of `GET`.
+
 ## Across a MessagePort
 
 To run the databases in a worker and the client on the main thread:
@@ -91,3 +107,9 @@ const fetch = fetchOverPort(port);
 
 Requests and responses cross the port as method, URL, headers and an
 ArrayBuffer body.
+
+`fetchOverPort(port, { timeoutMs })` returns a `fetch` with a `dispose()`
+method. Every pending request rejects with `PortClosedError` when the port
+emits `close` or `dispose()` is called, and with a `TimeoutError` after
+`timeoutMs` (off by default). Aborting a request aborts it on the serving side
+too, and its late response is dropped.

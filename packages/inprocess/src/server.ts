@@ -17,13 +17,15 @@ import {
   mapError,
   notFound,
   OvdbHttpError,
+  payloadTooLarge,
+  readDenied,
   readOnly,
 } from "./http.js";
 import { parseKeyPath } from "./keys.js";
 import { applyOps, parseBatch, type WriteOp } from "./ops.js";
 import { parseWireQuery, runQuery, runWireQuery } from "./query.js";
 import { maxSnapshotRows, SnapshotStore, type SnapshotScope } from "./snapshots.js";
-import type { WireUpdate } from "./updates.js";
+import { rejectProtoKeys, type WireUpdate } from "./updates.js";
 
 /** A DALgo database served in process; it may describe its capabilities and be resettable. */
 export type OvdbDatabase = Database & Partial<CapabilityAware> & Partial<Resettable>;
@@ -46,11 +48,13 @@ export interface CreateOvdbFetchOptions {
   readonly databases: Readonly<Record<string, OvdbDatabase>>;
   readonly canonical?: Readonly<Record<string, CanonicalSource>>;
   readonly localState?: (databaseId: string) => LocalState;
+  /** The largest request body accepted, in bytes (default 8 MiB); a larger one is answered 413 payload_too_large. */
+  readonly maxBodyBytes?: number;
 }
 
 export const defaultBaseUrl = "https://local.ovdb.invalid";
 
-const maxRequestBytes = 1 << 20;
+export const defaultMaxBodyBytes = 8 << 20;
 const maxDtqlUrlBytes = 8 << 10;
 
 const methodNotAllowed = (method: string): OvdbHttpError => new OvdbHttpError(405, "bad_request", `method not allowed: ${method}`);
@@ -71,7 +75,7 @@ const queryProfile = {
     protectedDatabases: false,
     fieldNames: "plain",
   },
-  limits: { maxRequestBytes, maxLimit, maxOffset },
+  limits: { maxRequestBytes: defaultMaxBodyBytes, maxLimit, maxOffset },
   joinEngines: [],
 } as const;
 
@@ -98,13 +102,29 @@ async function wireCapabilities(db: OvdbDatabase): Promise<Readonly<Record<strin
   };
 }
 
-async function readBody(request: Request, limit = Number.POSITIVE_INFINITY): Promise<string> {
-  const body = await request.arrayBuffer();
-  if (body.byteLength > limit) throw badRequest("failed to read body: http: request body too large");
-  return new TextDecoder().decode(body);
+/** Reads a body chunk by chunk and stops as soon as it passes the limit. */
+async function readBody(request: Request, limit: number): Promise<string> {
+  const declared = Number(request.headers.get("Content-Length"));
+  if (declared > limit) throw payloadTooLarge(limit);
+  if (request.body === null) return "";
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      throw payloadTooLarge(limit);
+    }
+    chunks.push(value);
+  }
+  const decoder = new TextDecoder();
+  return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join("") + decoder.decode();
 }
 
-async function readJsonBody(request: Request, limit?: number): Promise<unknown> {
+async function readJsonBody(request: Request, limit: number): Promise<unknown> {
   const text = await readBody(request, limit);
   try {
     return JSON.parse(text) as unknown;
@@ -127,10 +147,12 @@ class InProcessServer {
   readonly #options: CreateOvdbFetchOptions;
   readonly #base: string;
   readonly #snapshots = new SnapshotStore();
+  readonly #limit: number;
 
   public constructor(options: CreateOvdbFetchOptions, base: string) {
     this.#options = options;
     this.#base = base;
+    this.#limit = options.maxBodyBytes ?? defaultMaxBodyBytes;
   }
 
   public async route(request: Request, path: string, url: URL): Promise<Response> {
@@ -220,6 +242,10 @@ class InProcessServer {
     return capabilities;
   }
 
+  async #guardReads(db: OvdbDatabase): Promise<void> {
+    if (!(await capabilitiesOf(db)).read) throw readDenied();
+  }
+
   async #apply(db: OvdbDatabase, ops: readonly WriteOp[], capabilities: DatabaseCapabilities): Promise<number> {
     if (!capabilities.delete && ops.some(({ op }) => op === "delete")) throw readOnly();
     return applyOps(db, ops, new Date());
@@ -229,13 +255,16 @@ class InProcessServer {
     const method = request.method;
     if (method === "HEAD") {
       try {
+        await this.#guardReads(db);
         const snapshot = await db.get(parseKeyPath(recordKeyPath(path)));
         return emptyResponse(snapshot.exists ? 200 : 404);
       } catch (error) {
-        return emptyResponse(error instanceof OvdbHttpError && error.code === "invalid_key" ? 400 : 404);
+        const status = error instanceof OvdbHttpError ? { invalid_key: 400, read_denied: 403 }[error.code] : undefined;
+        return emptyResponse(status ?? 404);
       }
     }
     if (method === "GET") {
+      await this.#guardReads(db);
       const key = parseKeyPath(recordKeyPath(path));
       const snapshot = await db.get(key);
       if (!snapshot.exists) throw notFound(`record not found: ${key.path}`);
@@ -248,7 +277,7 @@ class InProcessServer {
       await this.#apply(db, [{ op: "delete", key }], capabilities);
       return emptyResponse(204);
     }
-    const body = await readJsonBody(request);
+    const body = await readJsonBody(request, this.#limit);
     if (method === "PATCH") {
       const updates = (body as { readonly updates?: unknown } | null)?.updates;
       if (!Array.isArray(updates) || updates.length === 0) throw badRequest('body must contain a non-empty "updates" array');
@@ -257,6 +286,7 @@ class InProcessServer {
     }
     const data = (body as { readonly data?: unknown } | null)?.data;
     if (typeof data !== "object" || data === null || Array.isArray(data)) throw badRequest('body must contain a "data" object');
+    rejectProtoKeys(data, "data");
     const insert = method === "POST";
     await this.#apply(db, [{ op: insert ? "insert" : "set", key, data: data as Record<string, unknown> }], capabilities);
     return emptyResponse(insert ? 201 : 204);
@@ -264,7 +294,7 @@ class InProcessServer {
 
   async #batch(request: Request, db: OvdbDatabase): Promise<Response> {
     const capabilities = await this.#guardWrites(db);
-    const ops = parseBatch(await readJsonBody(request));
+    const ops = parseBatch(await readJsonBody(request, this.#limit));
     return jsonResponse({ applied: await this.#apply(db, ops, capabilities) });
   }
 
@@ -277,6 +307,7 @@ class InProcessServer {
 
   async #query(request: Request, url: URL, id: string, db: OvdbDatabase): Promise<Response> {
     await this.#guardQueries(id, db);
+    await this.#guardReads(db);
     let body: unknown;
     if (request.method === "GET") {
       const q = url.searchParams.getAll("q");
@@ -287,7 +318,7 @@ class InProcessServer {
         throw badRequest(`invalid JSON query: ${(error as Error).message}`);
       }
     } else {
-      body = await readJsonBody(request, maxRequestBytes);
+      body = await readJsonBody(request, this.#limit);
     }
     const records = await runWireQuery(db, parseWireQuery(body));
     return jsonResponse({ records, complete: true });
@@ -319,7 +350,7 @@ class InProcessServer {
         throw badRequest((error as Error).message);
       }
     }
-    const text = await readBody(request, maxRequestBytes);
+    const text = await readBody(request, this.#limit);
     if (text === "") throw badRequest("body must contain a DTQL YAML document");
     const contentType = (request.headers.get("Content-Type") ?? "").replace(/;.*$/su, "").trim().toLowerCase();
     if (contentType !== "application/json") return parseYamlDocument(text);
@@ -334,6 +365,7 @@ class InProcessServer {
 
   async #dtql(request: Request, url: URL, id: string, db: OvdbDatabase): Promise<Response> {
     await this.#guardQueries(id, db);
+    await this.#guardReads(db);
     const document = await this.#dtqlDocument(request, url);
     const classified = classifyDocument(document, id);
     if (pagingHeaders(request)) return this.#pagedDtql(request, id, db, document, classified);
@@ -366,9 +398,13 @@ class InProcessServer {
       return emptyResponse(204);
     }
     if (token !== "") return jsonResponse(this.#snapshots.page(token, scope));
-    this.#snapshots.reserve();
-    const rows = await runQuery(db, { ...classified.query, limit: maxSnapshotRows + 1 });
-    return jsonResponse(this.#snapshots.capture(scope, rows.map(({ key, data }) => ({ key, data: project(data, classified.columns) }))));
+    const release = this.#snapshots.reserve();
+    try {
+      const rows = await runQuery(db, { ...classified.query, limit: maxSnapshotRows + 1 });
+      return jsonResponse(this.#snapshots.capture(scope, rows.map(({ key, data }) => ({ key, data: project(data, classified.columns) }))));
+    } finally {
+      release();
+    }
   }
 
   async #reset(id: string, db: OvdbDatabase): Promise<Response> {
@@ -397,7 +433,13 @@ export function createOvdbFetch(options: CreateOvdbFetchOptions): typeof globalT
     }
     try {
       if (!url.pathname.startsWith(`${prefix}/`)) throw notFound("not found");
-      return await server.route(request, url.pathname.slice(prefix.length), url);
+      const path = url.pathname.slice(prefix.length);
+      if (request.method !== "HEAD" || /^\/v1\/databases\/[^/]+\/records\//u.test(path)) {
+        return await server.route(request, path, url);
+      }
+      // HEAD answers like GET on the other routes, without a body.
+      const answer = await server.route(new Request(request, { method: "GET" }), path, url);
+      return new Response(null, { status: answer.status, headers: answer.headers });
     } catch (error) {
       return errorResponse(mapError(error));
     }

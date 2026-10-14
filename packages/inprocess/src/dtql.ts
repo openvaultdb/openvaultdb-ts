@@ -1,8 +1,8 @@
 import type { QueryFilter, QueryOperator, QueryOrder, StructuredQuery } from "@dalgo/core";
 import { parse as parseYaml } from "yaml";
 import { invalidDtql, OvdbHttpError } from "./http.js";
-import { validateSegment } from "./keys.js";
-import { isObject } from "./updates.js";
+import { validateCollection } from "./keys.js";
+import { isObject, nestsTooDeep } from "./updates.js";
 
 type Data = Record<string, unknown>;
 
@@ -63,11 +63,14 @@ function bind(node: unknown, parameters: Data, used: Set<string>): unknown {
 }
 
 export function parseYamlDocument(text: string): unknown {
+  let document: unknown;
   try {
-    return parseYaml(text) as unknown;
+    document = parseYaml(text) as unknown;
   } catch (error) {
     throw invalidDtql(`invalid DTQL YAML: ${(error as Error).message}`);
   }
+  if (nestsTooDeep(document)) throw invalidDtql("invalid DTQL YAML: nesting too deep");
+  return document;
 }
 
 /**
@@ -189,7 +192,7 @@ function collectionDocument(document: unknown, databaseId: string): CollectionDo
   }
   if (from.schema !== undefined && from.schema !== null) throw invalidDtql("a schema-qualified source is not supported by this engine");
   if (typeof from.name !== "string") throw invalidDtql("from.name must be a string");
-  validateSegment(from.name);
+  validateCollection(from.name);
   const where = given(document.where);
   const orderBy = given(document.orderBy);
   const rawColumns = given(document.columns);

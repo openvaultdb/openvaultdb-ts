@@ -57,7 +57,13 @@ export const defaultBaseUrl = "https://local.ovdb.invalid";
 export const defaultMaxBodyBytes = 8 << 20;
 const maxDtqlUrlBytes = 8 << 10;
 
-const methodNotAllowed = (method: string): OvdbHttpError => new OvdbHttpError(405, "bad_request", `method not allowed: ${method}`);
+/** The 405 for `method`, naming the methods the route does allow (a GET route allows HEAD too). */
+const methodNotAllowed = (method: string, allowed: readonly string[]): OvdbHttpError => {
+  const allow = allowed.includes("GET") ? [...allowed, "HEAD"] : allowed;
+  return new OvdbHttpError(405, "bad_request", `method not allowed: ${method}`, { Allow: allow.join(", ") });
+};
+
+const recordMethods = ["GET", "PUT", "POST", "PATCH", "DELETE"] as const;
 
 const queryProfile = {
   format: "dtql-yaml+json",
@@ -155,9 +161,10 @@ class InProcessServer {
     this.#limit = options.maxBodyBytes ?? defaultMaxBodyBytes;
   }
 
-  public async route(request: Request, path: string, url: URL): Promise<Response> {
+  /** Answers `request`; `method` is what the caller asked, which differs from request.method for a HEAD served as a GET. */
+  public async route(request: Request, path: string, url: URL, method = request.method): Promise<Response> {
     if (path === "/.well-known/openvaultdb") {
-      if (request.method !== "GET") throw methodNotAllowed(request.method);
+      if (request.method !== "GET") throw methodNotAllowed(method, ["GET"]);
       return this.#wellKnown();
     }
     const match = /^\/v1\/databases\/([^/]+)(\/.*)?$/u.exec(path);
@@ -171,7 +178,7 @@ class InProcessServer {
     };
     const methods = routes[rest];
     if (methods === undefined) throw notFound("not found");
-    if (!methods.includes(request.method)) throw methodNotAllowed(request.method);
+    if (!methods.includes(request.method)) throw methodNotAllowed(method, methods);
     switch (rest) {
       case "":
         return this.#descriptor(id, db);
@@ -270,7 +277,7 @@ class InProcessServer {
       if (!snapshot.exists) throw notFound(`record not found: ${key.path}`);
       return jsonResponse({ key: key.path, data: snapshot.data });
     }
-    if (!["PUT", "POST", "PATCH", "DELETE"].includes(method)) throw methodNotAllowed(method);
+    if (!(recordMethods as readonly string[]).includes(method)) throw methodNotAllowed(method, recordMethods);
     const capabilities = await this.#guardWrites(db);
     const key = parseKeyPath(recordKeyPath(path));
     if (method === "DELETE") {
@@ -431,17 +438,18 @@ export function createOvdbFetch(options: CreateOvdbFetchOptions): typeof globalT
     if (url.origin !== base.origin) {
       throw new TypeError(`the in-process OpenVaultDB fetch serves ${base.origin} only, not ${url.origin}`);
     }
+    const head = request.method === "HEAD";
+    let answer: Response;
     try {
       if (!url.pathname.startsWith(`${prefix}/`)) throw notFound("not found");
       const path = url.pathname.slice(prefix.length);
-      if (request.method !== "HEAD" || /^\/v1\/databases\/[^/]+\/records\//u.test(path)) {
-        return await server.route(request, path, url);
-      }
-      // HEAD answers like GET on the other routes, without a body.
-      const answer = await server.route(new Request(request, { method: "GET" }), path, url);
-      return new Response(null, { status: answer.status, headers: answer.headers });
+      // HEAD answers like GET on the routes other than a record's, which answers it itself.
+      const served = head && !/^\/v1\/databases\/[^/]+\/records\//u.test(path) ? new Request(request, { method: "GET" }) : request;
+      answer = await server.route(served, path, url, request.method);
     } catch (error) {
-      return errorResponse(mapError(error));
+      answer = errorResponse(mapError(error));
     }
+    // A HEAD answer, success or failure, is the status and headers only.
+    return head ? new Response(null, { status: answer.status, headers: answer.headers }) : answer;
   };
 }

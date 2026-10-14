@@ -20,6 +20,14 @@ export class PortClosedError extends Error {
   }
 }
 
+/** The far side of a port sent a message that breaks the bridge protocol (a malformed or conflicting request or reply). */
+export class PortProtocolError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "PortProtocolError";
+  }
+}
+
 export interface FetchOverPortOptions {
   /** Rejects a request that has no answer after this many milliseconds. Off by default. */
   readonly timeoutMs?: number;
@@ -68,8 +76,26 @@ function isMessage<T extends { readonly type: string }>(data: unknown, type: T["
   return typeof data === "object" && data !== null && (data as { readonly type?: unknown }).type === type;
 }
 
+const isId = (value: unknown): value is number => Number.isSafeInteger(value);
+
+function isHeaderList(value: unknown): value is [string, string][] {
+  return Array.isArray(value) && value.every((pair: unknown) =>
+    Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && typeof pair[1] === "string");
+}
+
+const isArrayBuffer = (value: unknown): value is ArrayBuffer => Object.prototype.toString.call(value) === "[object ArrayBuffer]";
+
+/** Why a request message is malformed, or undefined when it is well formed (its id is already known to be valid). */
+function requestFault(request: PortRequest): string | undefined {
+  if (typeof request.method !== "string") return "the method must be a string";
+  if (typeof request.url !== "string") return "the url must be a string";
+  if (!isHeaderList(request.headers)) return "the headers must be a list of [name, value] string pairs";
+  if (request.body !== undefined && !isArrayBuffer(request.body)) return "the body must be an ArrayBuffer";
+  return undefined;
+}
+
 /** Statuses whose responses carry no body (the Fetch spec's "null body status"). */
-const nullBodyStatuses = new Set([101, 103, 204, 205, 304]);
+const nullBodyStatuses = new Set([204, 205, 304]);
 
 /**
  * Answers requests that arrive on `port` with `fetch` (for example the fetch
@@ -81,6 +107,13 @@ const nullBodyStatuses = new Set([101, 103, 204, 205, 304]);
  */
 export function serveFetchOverPort(fetch: typeof globalThis.fetch, port: FetchPort): () => void {
   const running = new Map<number, AbortController>();
+  const refuse = (id: number, message: string): void => {
+    try {
+      port.postMessage({ type: responseType, id, ok: false, name: "PortProtocolError", message }, []);
+    } catch {
+      // The port is unusable: the caller learns from its close event or timeout.
+    }
+  };
   const listener = (event: MessageEvent): void => {
     const message: unknown = event.data;
     if (isMessage<PortAbort>(message, abortType)) {
@@ -88,7 +121,12 @@ export function serveFetchOverPort(fetch: typeof globalThis.fetch, port: FetchPo
       return;
     }
     const request = message;
-    if (!isMessage<PortRequest>(request, requestType)) return;
+    if (!isMessage<PortRequest>(request, requestType) || !isId(request.id)) return;
+    const refusal = running.has(request.id) ? "the request id is already in flight" : requestFault(request);
+    if (refusal !== undefined) {
+      refuse(request.id, refusal);
+      return;
+    }
     const controller = new AbortController();
     running.set(request.id, controller);
     void (async () => {
@@ -136,6 +174,31 @@ export function serveFetchOverPort(fetch: typeof globalThis.fetch, port: FetchPo
   };
 }
 
+/** Turns a reply into the Response it carries or the error it reports; a malformed reply becomes a PortProtocolError. */
+function answerOf(reply: Readonly<Record<string, unknown>>): Response | Error {
+  const { ok, name, message, status, statusText, headers, body } = reply;
+  if (ok === false) {
+    if (typeof name !== "string" || typeof message !== "string") return new PortProtocolError("a failure reply needs a string name and message");
+    const error = name === "TypeError" ? new TypeError(message) : name === "PortProtocolError" ? new PortProtocolError(message) : new Error(message);
+    error.name = name;
+    return error;
+  }
+  if (ok !== true) return new PortProtocolError("a reply needs a boolean ok");
+  if (typeof status !== "number" || !Number.isInteger(status) || status < 200 || status > 599) {
+    return new PortProtocolError("the reply status must be an integer from 200 to 599");
+  }
+  if (typeof statusText !== "string") return new PortProtocolError("the reply statusText must be a string");
+  if (!isHeaderList(headers)) return new PortProtocolError("the reply headers must be a list of [name, value] string pairs");
+  if (!isArrayBuffer(body)) return new PortProtocolError("the reply body must be an ArrayBuffer");
+  const bodyless = nullBodyStatuses.has(status);
+  if (bodyless && body.byteLength > 0) return new PortProtocolError(`a ${status.toString()} reply cannot carry a body`);
+  try {
+    return new Response(bodyless ? null : body, { status, statusText, headers });
+  } catch (error) {
+    return new PortProtocolError(`the reply is not a valid response: ${(error as Error).message}`);
+  }
+}
+
 interface Waiter {
   readonly resolve: (response: Response) => void;
   readonly reject: (error: Error) => void;
@@ -159,17 +222,9 @@ export function fetchOverPort(port: FetchPort, options: FetchOverPortOptions = {
     if (!isMessage<PortResponse>(reply, responseType)) return;
     const waiter = pending.get(reply.id);
     if (waiter === undefined) return;
-    if (!reply.ok) {
-      const error = reply.name === "TypeError" ? new TypeError(reply.message) : new Error(reply.message);
-      error.name = reply.name;
-      waiter.reject(error);
-      return;
-    }
-    waiter.resolve(new Response(nullBodyStatuses.has(reply.status) ? null : reply.body, {
-      status: reply.status,
-      statusText: reply.statusText,
-      headers: reply.headers as [string, string][],
-    }));
+    const outcome = answerOf(reply);
+    if (outcome instanceof Response) waiter.resolve(outcome);
+    else waiter.reject(outcome);
   };
   const close = (): void => {
     if (state.closed) return;

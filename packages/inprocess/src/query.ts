@@ -1,6 +1,6 @@
 import type { Database, Key, QueryFilter, QueryOperator, QueryOrder, StructuredQuery } from "@dalgo/core";
 import { badRequest, invalidKey, OvdbHttpError } from "./http.js";
-import { parseKeyPath, validateSegment } from "./keys.js";
+import { parseKeyPath, validateCollection } from "./keys.js";
 import { isObject } from "./updates.js";
 
 type Data = Record<string, unknown>;
@@ -53,7 +53,7 @@ export function parseWireQuery(body: unknown): WireQuery {
   if (!isObject(body)) throw badRequest("invalid JSON body: the query must be an object");
   const { collection, parent, where, orderBy, limit, keysOnly } = body;
   if (typeof collection !== "string") throw invalidKey("query: collection: invalid key: empty segment");
-  prefixed("query: collection", () => { validateSegment(collection); });
+  prefixed("query: collection", () => { validateCollection(collection); });
   const parentKey: Key | undefined = parent === undefined || parent === ""
     ? undefined
     : prefixed("query: parent", () => parseKeyPath(typeof parent === "string" ? parent : ""));

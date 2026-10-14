@@ -84,7 +84,13 @@ constraint the adapter refuses is `409 constraint_violation`, and
 Beyond the Go server's behaviour, this server also:
 
 - refuses a request body over `maxBodyBytes` (default 8 MiB) with
-  `413 payload_too_large`, while reading it;
+  `413 payload_too_large`, while reading it, and a DTQL document over
+  `maxDtqlBytes` (default 256 KiB) the same way, before any YAML parsing, since
+  the YAML library parses a whole document before its depth can be checked;
+- refuses a DTQL document nested deeper than 256 levels (flow or block style)
+  with `400 invalid_dtql` from a linear pre-parse scan, parses it with the core
+  schema only (no custom tags, merge keys or duplicate keys) and refuses an
+  unresolved tag;
 - answers `403 read_denied` for reads (record `GET`/`HEAD`, query, DTQL) of a
   database whose capabilities say `read: false` (`ovdb serve` has no such
   denial, so the code is this server's own);

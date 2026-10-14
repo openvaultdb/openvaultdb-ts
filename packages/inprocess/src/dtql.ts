@@ -1,8 +1,8 @@
 import type { QueryFilter, QueryOperator, QueryOrder, StructuredQuery } from "@dalgo/core";
-import { parse as parseYaml } from "yaml";
+import { parseDocument } from "yaml";
 import { invalidDtql, OvdbHttpError } from "./http.js";
 import { validateCollection } from "./keys.js";
-import { isObject, nestsTooDeep } from "./updates.js";
+import { isObject, maxNesting, nestsTooDeep } from "./updates.js";
 
 type Data = Record<string, unknown>;
 
@@ -62,10 +62,104 @@ function bind(node: unknown, parameters: Data, used: Set<string>): unknown {
   return Object.fromEntries(keys.map((key) => [key, bind(node[key], parameters, used)]));
 }
 
+const space = 32;
+const tab = 9;
+const isBlank = (code: number): boolean => code === space || code === tab || code === 13;
+
+/**
+ * Refuses, in one linear pass and before the YAML library sees the text, a DTQL
+ * document that nests deeper than maxNesting: flow collections (`[` and `{`)
+ * count one level each, block collections one level per distinct indentation
+ * (or `- ` marker) on a line. Quoted scalars, comments and block scalar bodies
+ * are skipped, so a bracket inside them never counts. It never counts more
+ * levels than the parsed document has, bar a plain scalar continued on ever
+ * deeper lines, so it refuses nothing a sane query holds; the post-parse
+ * check stays as the exact one. The library alone would parse the whole
+ * document first, which a deep flow body turns into seconds and gigabytes.
+ */
+export function scanNesting(text: string): void {
+  const tooDeep = (): never => {
+    throw invalidDtql("invalid DTQL YAML: nesting too deep");
+  };
+  const indents: number[] = [];
+  const end = text.length;
+  let flow = 0;
+  let quote = 0;
+  let skipBelow = -1; // a block scalar body is skipped while its lines are indented past this column
+  for (let lineStart = 0; lineStart <= end;) {
+    let eol = text.indexOf("\n", lineStart);
+    if (eol === -1) eol = end;
+    let at = lineStart;
+    if (quote === 0 && flow === 0) {
+      while (at < eol && text.charCodeAt(at) === space) at++;
+      const column = at - lineStart;
+      const blank = at === eol || text.charCodeAt(at) === 13;
+      if (skipBelow >= 0 && (blank || column > skipBelow)) {
+        lineStart = eol + 1;
+        continue;
+      }
+      skipBelow = -1;
+      if (!blank && text.charCodeAt(at) !== 35) {
+        while (indents.length > 0 && (indents[indents.length - 1] as number) > column) indents.pop();
+        if (indents.length === 0 || (indents[indents.length - 1] as number) < column) indents.push(column);
+        while (text.charCodeAt(at) === 45 && (at + 1 === eol || isBlank(text.charCodeAt(at + 1)))) {
+          at++;
+          while (at < eol && isBlank(text.charCodeAt(at))) at++;
+          indents.push(at - lineStart);
+        }
+        if (indents.length > maxNesting) tooDeep();
+      }
+    }
+    let contentEnd = eol;
+    for (let i = at; i < eol; i++) {
+      const code = text.charCodeAt(i);
+      const before = i === lineStart ? space : text.charCodeAt(i - 1);
+      if (quote === 39) {
+        if (code === 39) {
+          if (text.charCodeAt(i + 1) === 39) i++;
+          else quote = 0;
+        }
+      } else if (quote === 34) {
+        if (code === 92) i++;
+        else if (code === 34) quote = 0;
+      } else if (code === 35 && isBlank(before)) {
+        contentEnd = i;
+        break;
+      } else if ((code === 39 || code === 34) && (isBlank(before) || before === 91 || before === 123 || before === 44 || before === 58)) {
+        quote = code;
+      } else if ((code === 91 || code === 123) && (flow > 0 || isBlank(before) || before === 58)) {
+        flow++;
+        if (flow + indents.length > maxNesting + 1) tooDeep(); // a root flow line holds one indent level without being a block
+      } else if ((code === 93 || code === 125) && flow > 0) {
+        flow--;
+      }
+    }
+    if (quote === 0 && flow === 0) {
+      let last = contentEnd;
+      while (last > at && isBlank(text.charCodeAt(last - 1))) last--;
+      while (last > at && /[+\-0-9]/u.test(text[last - 1] as string)) last--;
+      const marker = last > at ? text.charCodeAt(last - 1) : 0;
+      if ((marker === 124 || marker === 62) && (last - 1 === at || isBlank(text.charCodeAt(last - 2)))) {
+        skipBelow = indents[indents.length - 1] as number; // a line with content has pushed its indent
+      }
+    }
+    lineStart = eol + 1;
+  }
+}
+
+/**
+ * Parses a DTQL YAML document with the core schema only: no custom tags, no
+ * merge keys, no duplicate keys, at most 100 aliases; an unresolved tag such as
+ * `!!js/function` is refused instead of being left to a loader.
+ */
 export function parseYamlDocument(text: string): unknown {
+  scanNesting(text);
   let document: unknown;
   try {
-    document = parseYaml(text) as unknown;
+    const parsed = parseDocument(text, { schema: "core", customTags: [], merge: false, uniqueKeys: true });
+    const problem = parsed.errors[0] ?? parsed.warnings[0];
+    if (problem !== undefined) throw problem;
+    document = parsed.toJS({ maxAliasCount: 100 }) as unknown;
   } catch (error) {
     throw invalidDtql(`invalid DTQL YAML: ${(error as Error).message}`);
   }

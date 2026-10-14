@@ -50,11 +50,18 @@ export interface CreateOvdbFetchOptions {
   readonly localState?: (databaseId: string) => LocalState;
   /** The largest request body accepted, in bytes (default 8 MiB); a larger one is answered 413 payload_too_large. */
   readonly maxBodyBytes?: number;
+  /**
+   * The largest DTQL/YAML document accepted, in bytes (default 256 KiB), checked while
+   * reading and before any parsing; a larger one is answered 413 payload_too_large.
+   * It also bounds a DTQL body below maxBodyBytes, which still caps record and batch bodies.
+   */
+  readonly maxDtqlBytes?: number;
 }
 
 export const defaultBaseUrl = "https://local.ovdb.invalid";
 
 export const defaultMaxBodyBytes = 8 << 20;
+export const defaultMaxDtqlBytes = 256 << 10;
 const maxDtqlUrlBytes = 8 << 10;
 
 /** The 405 for `method`, naming the methods the route does allow (a GET route allows HEAD too). */
@@ -109,9 +116,9 @@ async function wireCapabilities(db: OvdbDatabase): Promise<Readonly<Record<strin
 }
 
 /** Reads a body chunk by chunk and stops as soon as it passes the limit. */
-async function readBody(request: Request, limit: number): Promise<string> {
+async function readBody(request: Request, limit: number, what?: string): Promise<string> {
   const declared = Number(request.headers.get("Content-Length"));
-  if (declared > limit) throw payloadTooLarge(limit);
+  if (declared > limit) throw payloadTooLarge(limit, what);
   if (request.body === null) return "";
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -122,7 +129,7 @@ async function readBody(request: Request, limit: number): Promise<string> {
     size += value.byteLength;
     if (size > limit) {
       await reader.cancel();
-      throw payloadTooLarge(limit);
+      throw payloadTooLarge(limit, what);
     }
     chunks.push(value);
   }
@@ -154,11 +161,13 @@ class InProcessServer {
   readonly #base: string;
   readonly #snapshots = new SnapshotStore();
   readonly #limit: number;
+  readonly #dtqlLimit: number;
 
   public constructor(options: CreateOvdbFetchOptions, base: string) {
     this.#options = options;
     this.#base = base;
     this.#limit = options.maxBodyBytes ?? defaultMaxBodyBytes;
+    this.#dtqlLimit = Math.min(this.#limit, options.maxDtqlBytes ?? defaultMaxDtqlBytes);
   }
 
   /** Answers `request`; `method` is what the caller asked, which differs from request.method for a HEAD served as a GET. */
@@ -357,7 +366,7 @@ class InProcessServer {
         throw badRequest((error as Error).message);
       }
     }
-    const text = await readBody(request, this.#limit);
+    const text = await readBody(request, this.#dtqlLimit, "DTQL document (maxDtqlBytes)");
     if (text === "") throw badRequest("body must contain a DTQL YAML document");
     const contentType = (request.headers.get("Content-Type") ?? "").replace(/;.*$/su, "").trim().toLowerCase();
     if (contentType !== "application/json") return parseYamlDocument(text);

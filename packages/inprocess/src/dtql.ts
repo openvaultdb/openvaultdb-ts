@@ -1,8 +1,8 @@
 import type { QueryFilter, QueryOperator, QueryOrder, StructuredQuery } from "@dalgo/core";
-import { parse as parseYaml } from "yaml";
+import { isMap, isScalar as isYamlScalar, isSeq, parseDocument } from "yaml";
 import { invalidDtql, OvdbHttpError } from "./http.js";
 import { validateCollection } from "./keys.js";
-import { isObject, nestsTooDeep } from "./updates.js";
+import { isObject, maxNesting, nestsTooDeep } from "./updates.js";
 
 type Data = Record<string, unknown>;
 
@@ -62,10 +62,149 @@ function bind(node: unknown, parameters: Data, used: Set<string>): unknown {
   return Object.fromEntries(keys.map((key) => [key, bind(node[key], parameters, used)]));
 }
 
+const space = 32;
+const isBlank = (code: number): boolean => code === space || code === 9 || code === 13;
+const isFlowIndicator = (code: number): boolean => code === 44 || code === 91 || code === 93 || code === 123 || code === 125;
+
+/**
+ * Refuses, in one linear pass and before the YAML library sees the text, a DTQL
+ * document that nests deeper than maxNesting: flow collections (`[` and `{`)
+ * count one level each, block collections one level per distinct indentation
+ * (or `- ` marker) on a line. A flow collection opens only where a node can
+ * start (line start, after `: `, `- `, `? `, a flow `,`, `[`, `{`, or a tag or
+ * anchor prefix), so a bracket inside a plain scalar never counts; quoted
+ * scalars, comments and block scalar bodies are skipped too. It never counts
+ * more levels than the parsed document has, bar a plain scalar continued on
+ * ever deeper lines, so it refuses nothing a sane query holds; the post-parse
+ * check stays as the exact one. The library alone would parse the whole
+ * document first, which a deep flow body turns into seconds and gigabytes.
+ */
+export function scanNesting(text: string): void {
+  const tooDeep = (): never => {
+    throw invalidDtql("invalid DTQL YAML: nesting too deep");
+  };
+  const indents: number[] = [];
+  const end = text.length;
+  let flow = 0;
+  let quote = 0;
+  let canStart = true; // whether the next non-blank character starts a node
+  let skipBelow = -1; // a block scalar body is skipped while its lines are indented past this column
+  for (let lineStart = 0; lineStart <= end;) {
+    let eol = text.indexOf("\n", lineStart);
+    if (eol === -1) eol = end;
+    let at = lineStart;
+    if (quote === 0 && flow === 0) {
+      canStart = true;
+      while (at < eol && text.charCodeAt(at) === space) at++;
+      const column = at - lineStart;
+      const blank = at === eol || text.charCodeAt(at) === 13;
+      if (skipBelow >= 0 && (blank || column > skipBelow)) {
+        lineStart = eol + 1;
+        continue;
+      }
+      skipBelow = -1;
+      if (!blank && text.charCodeAt(at) !== 35) {
+        while (indents.length > 0 && (indents[indents.length - 1] as number) > column) indents.pop();
+        if (indents.length === 0 || (indents[indents.length - 1] as number) < column) indents.push(column);
+        // the first marker is the collection of this indent; each further one opens a collection of its own
+        const dash = (position: number): boolean => text.charCodeAt(position) === 45 && (position + 1 === eol || isBlank(text.charCodeAt(position + 1)));
+        while (dash(at)) {
+          at++;
+          while (at < eol && isBlank(text.charCodeAt(at))) at++;
+          if (dash(at)) indents.push(at - lineStart);
+        }
+        if (indents.length > maxNesting) tooDeep();
+      }
+    }
+    let contentEnd = eol;
+    for (let i = at; i < eol; i++) {
+      const code = text.charCodeAt(i);
+      const next = i + 1 < eol ? text.charCodeAt(i + 1) : 10;
+      if (quote === 39) {
+        if (code === 39) {
+          if (next === 39) i++;
+          else quote = 0;
+        }
+      } else if (quote === 34) {
+        if (code === 92) i++;
+        else if (code === 34) quote = 0;
+      } else if (code === 35 && (i === lineStart || isBlank(text.charCodeAt(i - 1)))) {
+        contentEnd = i;
+        break;
+      } else if (isBlank(code)) {
+        continue;
+      } else if (canStart && (code === 33 || code === 38)) {
+        // a tag or anchor prefix: the node it decorates still starts after it
+        while (i + 1 < eol && !isBlank(text.charCodeAt(i + 1)) && (flow === 0 || !isFlowIndicator(text.charCodeAt(i + 1)))) i++;
+      } else if ((code === 39 || code === 34) && canStart) {
+        quote = code;
+        canStart = false;
+      } else if ((code === 91 || code === 123) && (canStart || flow > 0)) {
+        flow++;
+        canStart = true;
+        if (flow + indents.length > maxNesting + 1) tooDeep(); // a root flow line holds one indent level without being a block
+      } else if ((code === 93 || code === 125) && flow > 0) {
+        flow--;
+      } else if ((code === 44 && flow > 0) || (code === 58 && (flow > 0 || isBlank(next) || next === 10)) || (code === 63 && canStart && isBlank(next))) {
+        canStart = true;
+      } else {
+        canStart = false;
+      }
+    }
+    if (quote === 0 && flow === 0) {
+      let last = contentEnd;
+      while (last > at && isBlank(text.charCodeAt(last - 1))) last--;
+      while (last > at && /[+\-0-9]/u.test(text[last - 1] as string)) last--;
+      const marker = last > at ? text.charCodeAt(last - 1) : 0;
+      if ((marker === 124 || marker === 62) && (last - 1 === at || isBlank(text.charCodeAt(last - 2)))) {
+        skipBelow = indents[indents.length - 1] as number; // a line with content has pushed its indent
+      }
+    }
+    lineStart = eol + 1;
+  }
+}
+
+/**
+ * Refuses the first map holding two keys that are equal scalars (the same rule
+ * as the library's `uniqueKeys`, whose check compares every pair of keys and
+ * so takes quadratic time), in linear time with one Set per map. `1` and `"1"`
+ * differ; `.nan` equals nothing, as in the library. Walks with an explicit stack.
+ */
+function rejectDuplicateKeys(root: unknown): void {
+  const stack: unknown[] = [root];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    if (isMap(node)) {
+      const seen = new Set<unknown>();
+      for (const pair of node.items) {
+        const key = pair.key;
+        if (isYamlScalar(key) && !Number.isNaN(key.value)) {
+          if (seen.has(key.value)) throw new Error("duplicate key");
+          seen.add(key.value);
+        }
+        stack.push(key, pair.value);
+      }
+    } else if (isSeq(node)) {
+      for (const item of node.items) stack.push(item);
+    }
+  }
+}
+
+/**
+ * Parses a DTQL YAML document with the core schema only: no merge keys, at most
+ * 100 aliases, no duplicate keys; any warning is refused, so an unresolved or
+ * mismatched tag such as `!!js/function` or `!!float 1` never reaches a loader.
+ * (customTags: [] equals the core schema's default and only states the intent.)
+ */
 export function parseYamlDocument(text: string): unknown {
+  scanNesting(text);
   let document: unknown;
   try {
-    document = parseYaml(text) as unknown;
+    // uniqueKeys is off because the library's check is quadratic; rejectDuplicateKeys replaces it
+    const parsed = parseDocument(text, { schema: "core", customTags: [], merge: false, uniqueKeys: false });
+    const problem = parsed.errors[0] ?? parsed.warnings[0];
+    if (problem !== undefined) throw problem;
+    rejectDuplicateKeys(parsed.contents);
+    document = parsed.toJS({ maxAliasCount: 100 }) as unknown;
   } catch (error) {
     throw invalidDtql(`invalid DTQL YAML: ${(error as Error).message}`);
   }

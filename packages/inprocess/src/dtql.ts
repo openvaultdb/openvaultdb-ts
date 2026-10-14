@@ -1,5 +1,5 @@
 import type { QueryFilter, QueryOperator, QueryOrder, StructuredQuery } from "@dalgo/core";
-import { parseDocument } from "yaml";
+import { isMap, isScalar as isYamlScalar, isSeq, parseDocument } from "yaml";
 import { invalidDtql, OvdbHttpError } from "./http.js";
 import { validateCollection } from "./keys.js";
 import { isObject, maxNesting, nestsTooDeep } from "./updates.js";
@@ -63,17 +63,19 @@ function bind(node: unknown, parameters: Data, used: Set<string>): unknown {
 }
 
 const space = 32;
-const tab = 9;
-const isBlank = (code: number): boolean => code === space || code === tab || code === 13;
+const isBlank = (code: number): boolean => code === space || code === 9 || code === 13;
+const isFlowIndicator = (code: number): boolean => code === 44 || code === 91 || code === 93 || code === 123 || code === 125;
 
 /**
  * Refuses, in one linear pass and before the YAML library sees the text, a DTQL
  * document that nests deeper than maxNesting: flow collections (`[` and `{`)
  * count one level each, block collections one level per distinct indentation
- * (or `- ` marker) on a line. Quoted scalars, comments and block scalar bodies
- * are skipped, so a bracket inside them never counts. It never counts more
- * levels than the parsed document has, bar a plain scalar continued on ever
- * deeper lines, so it refuses nothing a sane query holds; the post-parse
+ * (or `- ` marker) on a line. A flow collection opens only where a node can
+ * start (line start, after `: `, `- `, `? `, a flow `,`, `[`, `{`, or a tag or
+ * anchor prefix), so a bracket inside a plain scalar never counts; quoted
+ * scalars, comments and block scalar bodies are skipped too. It never counts
+ * more levels than the parsed document has, bar a plain scalar continued on
+ * ever deeper lines, so it refuses nothing a sane query holds; the post-parse
  * check stays as the exact one. The library alone would parse the whole
  * document first, which a deep flow body turns into seconds and gigabytes.
  */
@@ -85,12 +87,14 @@ export function scanNesting(text: string): void {
   const end = text.length;
   let flow = 0;
   let quote = 0;
+  let canStart = true; // whether the next non-blank character starts a node
   let skipBelow = -1; // a block scalar body is skipped while its lines are indented past this column
   for (let lineStart = 0; lineStart <= end;) {
     let eol = text.indexOf("\n", lineStart);
     if (eol === -1) eol = end;
     let at = lineStart;
     if (quote === 0 && flow === 0) {
+      canStart = true;
       while (at < eol && text.charCodeAt(at) === space) at++;
       const column = at - lineStart;
       const blank = at === eol || text.charCodeAt(at) === 13;
@@ -102,10 +106,12 @@ export function scanNesting(text: string): void {
       if (!blank && text.charCodeAt(at) !== 35) {
         while (indents.length > 0 && (indents[indents.length - 1] as number) > column) indents.pop();
         if (indents.length === 0 || (indents[indents.length - 1] as number) < column) indents.push(column);
-        while (text.charCodeAt(at) === 45 && (at + 1 === eol || isBlank(text.charCodeAt(at + 1)))) {
+        // the first marker is the collection of this indent; each further one opens a collection of its own
+        const dash = (position: number): boolean => text.charCodeAt(position) === 45 && (position + 1 === eol || isBlank(text.charCodeAt(position + 1)));
+        while (dash(at)) {
           at++;
           while (at < eol && isBlank(text.charCodeAt(at))) at++;
-          indents.push(at - lineStart);
+          if (dash(at)) indents.push(at - lineStart);
         }
         if (indents.length > maxNesting) tooDeep();
       }
@@ -113,25 +119,36 @@ export function scanNesting(text: string): void {
     let contentEnd = eol;
     for (let i = at; i < eol; i++) {
       const code = text.charCodeAt(i);
-      const before = i === lineStart ? space : text.charCodeAt(i - 1);
+      const next = i + 1 < eol ? text.charCodeAt(i + 1) : 10;
       if (quote === 39) {
         if (code === 39) {
-          if (text.charCodeAt(i + 1) === 39) i++;
+          if (next === 39) i++;
           else quote = 0;
         }
       } else if (quote === 34) {
         if (code === 92) i++;
         else if (code === 34) quote = 0;
-      } else if (code === 35 && isBlank(before)) {
+      } else if (code === 35 && (i === lineStart || isBlank(text.charCodeAt(i - 1)))) {
         contentEnd = i;
         break;
-      } else if ((code === 39 || code === 34) && (isBlank(before) || before === 91 || before === 123 || before === 44 || before === 58)) {
+      } else if (isBlank(code)) {
+        continue;
+      } else if (canStart && (code === 33 || code === 38)) {
+        // a tag or anchor prefix: the node it decorates still starts after it
+        while (i + 1 < eol && !isBlank(text.charCodeAt(i + 1)) && (flow === 0 || !isFlowIndicator(text.charCodeAt(i + 1)))) i++;
+      } else if ((code === 39 || code === 34) && canStart) {
         quote = code;
-      } else if ((code === 91 || code === 123) && (flow > 0 || isBlank(before) || before === 58)) {
+        canStart = false;
+      } else if ((code === 91 || code === 123) && (canStart || flow > 0)) {
         flow++;
+        canStart = true;
         if (flow + indents.length > maxNesting + 1) tooDeep(); // a root flow line holds one indent level without being a block
       } else if ((code === 93 || code === 125) && flow > 0) {
         flow--;
+      } else if ((code === 44 && flow > 0) || (code === 58 && (flow > 0 || isBlank(next) || next === 10)) || (code === 63 && canStart && isBlank(next))) {
+        canStart = true;
+      } else {
+        canStart = false;
       }
     }
     if (quote === 0 && flow === 0) {
@@ -148,17 +165,45 @@ export function scanNesting(text: string): void {
 }
 
 /**
- * Parses a DTQL YAML document with the core schema only: no custom tags, no
- * merge keys, no duplicate keys, at most 100 aliases; an unresolved tag such as
- * `!!js/function` is refused instead of being left to a loader.
+ * Refuses the first map holding two keys that are equal scalars (the same rule
+ * as the library's `uniqueKeys`, whose check compares every pair of keys and
+ * so takes quadratic time), in linear time with one Set per map. `1` and `"1"`
+ * differ; `.nan` equals nothing, as in the library. Walks with an explicit stack.
+ */
+function rejectDuplicateKeys(root: unknown): void {
+  const stack: unknown[] = [root];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    if (isMap(node)) {
+      const seen = new Set<unknown>();
+      for (const pair of node.items) {
+        const key = pair.key;
+        if (isYamlScalar(key) && !Number.isNaN(key.value)) {
+          if (seen.has(key.value)) throw new Error("duplicate key");
+          seen.add(key.value);
+        }
+        stack.push(key, pair.value);
+      }
+    } else if (isSeq(node)) {
+      for (const item of node.items) stack.push(item);
+    }
+  }
+}
+
+/**
+ * Parses a DTQL YAML document with the core schema only: no merge keys, at most
+ * 100 aliases, no duplicate keys; any warning is refused, so an unresolved or
+ * mismatched tag such as `!!js/function` or `!!float 1` never reaches a loader.
+ * (customTags: [] equals the core schema's default and only states the intent.)
  */
 export function parseYamlDocument(text: string): unknown {
   scanNesting(text);
   let document: unknown;
   try {
-    const parsed = parseDocument(text, { schema: "core", customTags: [], merge: false, uniqueKeys: true });
+    // uniqueKeys is off because the library's check is quadratic; rejectDuplicateKeys replaces it
+    const parsed = parseDocument(text, { schema: "core", customTags: [], merge: false, uniqueKeys: false });
     const problem = parsed.errors[0] ?? parsed.warnings[0];
     if (problem !== undefined) throw problem;
+    rejectDuplicateKeys(parsed.contents);
     document = parsed.toJS({ maxAliasCount: 100 }) as unknown;
   } catch (error) {
     throw invalidDtql(`invalid DTQL YAML: ${(error as Error).message}`);

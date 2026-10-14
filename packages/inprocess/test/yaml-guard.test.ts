@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { scanNesting } from "../src/dtql.js";
+import { parseDocument } from "yaml";
+import { parseYamlDocument, scanNesting } from "../src/dtql.js";
 import { createOvdbFetch, defaultMaxDtqlBytes } from "../src/index.js";
 import { MapDatabase } from "./fake-database.js";
 import { base, caller, refusal } from "./helpers.js";
@@ -207,5 +208,184 @@ describe("a large but valid document at the cap", () => {
     // the values list exceeds the 1000-value parameter bound only for parameters; a document list is plain
     expect([200, 400, 422]).toContain(result.status);
     expect(ms).toBeLessThan(2000);
+  });
+});
+
+/** Fills a document up to the DTQL cap with repeated items. */
+function filled(head: string, item: (index: number) => string, tail: string): string {
+  const out: string[] = [];
+  let size = head.length + tail.length;
+  for (let index = 0; ; index += 1) {
+    const text = item(index);
+    if (size + text.length > defaultMaxDtqlBytes) break;
+    out.push(text);
+    size += text.length;
+  }
+  return head + out.join("") + tail;
+}
+
+describe("worst-case documents at the cap stay linear (the library's own duplicate-key check is quadratic)", () => {
+  const shapes: Record<string, { text: string; refused: boolean }> = {
+    "flow set {a,a,...}": { text: filled("{", () => "a,", "}"), refused: true },
+    "block map k0: 1 ...": { text: filled("", (i) => `k${i.toString()}: 1\n`, ""), refused: false },
+    "flow map k0: 1, ...": { text: filled("{", (i) => `k${i.toString()}: 1,`, "}"), refused: false },
+    "flow {0:1,1:1,...}": { text: filled("{", (i) => `${i.toString()}:1,`, "}"), refused: false },
+    "anchors k0: &a0 1 ...": { text: filled("", (i) => `k${i.toString()}: &a${i.toString()} 1\n`, ""), refused: false },
+    "same key with anchors": { text: filled("", (i) => `k: &a${i.toString()} 1\n`, ""), refused: true },
+  };
+  for (const [name, { text, refused }] of Object.entries(shapes)) {
+    it(`${name}: ${refused ? "refused as a duplicate" : "parsed, then refused as a DTQL document"} in under 3 s`, async () => {
+      expect(text.length).toBeGreaterThan(defaultMaxDtqlBytes - 64);
+      const call = caller({ databases: { d: seeded() } });
+      const { result, ms } = await timed(() => call("POST", path, text));
+      expect(result).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+      if (refused) expect((result.body as { error: { message: string } }).error.message).toContain("duplicate key");
+      // before the fix these took 9-39 s; now 0.1-0.8 s locally
+      expect(ms).toBeLessThan(3000);
+    });
+  }
+});
+
+describe("duplicate keys are refused as the library's uniqueKeys refuses them", () => {
+  const refuses = (text: string): string | undefined => {
+    try {
+      parseYamlDocument(text);
+      return undefined;
+    } catch (error) {
+      return (error as Error).message;
+    }
+  };
+
+  it("flow, block, nested, quoted and unquoted equal keys, numbers, null keys", () => {
+    for (const text of [
+      "a: 1\na: 2", "{a: 1, a: 2}", "x: {a: 1, a: 2}", "x: [{a: 1, a: 2}]", "a: 1\n\"a\": 2", "'a': 1\na: 2", "1: x\n1: y", "1: x\n1.0: y",
+      "~: 1\nnull: 2", "? ~\n: 1\n? null\n: 2", "true: 1\ntrue: 2", "{a, a}", "x:\n  y:\n    a: 1\n    a: 2",
+    ]) expect(refuses(text), text).toContain("duplicate key");
+    for (const text of ["1: x\n\"1\": y", "a: 1\nb: 1", "x: {a: 1}\ny: {a: 1}", ".nan: 1\n.nan: 2", "true: 1\n\"true\": 2", "{a: 1}", ""]) {
+      expect(refuses(text), text).toBeUndefined();
+    }
+  });
+
+  it("agrees with the library's own uniqueKeys check on random small documents", () => {
+    let state = 20_261_014;
+    const random = (limit: number): number => {
+      state = (state + 0x6d2b79f5) | 0;
+      let t = Math.imul(state ^ (state >>> 15), 1 | state);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return (((t ^ (t >>> 14)) >>> 0) % limit);
+    };
+    const keys = ["a", '"a"', "'a'", "b", "1", '"1"', "1.0", "~", "null", '"null"', "true", '"true"', ".nan", "0", "-0", "0x1", "1e0"];
+    const value = (depth: number): string => (depth > 2 || random(3) === 0 ? String(random(9)) : collection(depth + 1));
+    const collection = (depth: number): string => {
+      const count = 1 + random(4);
+      const pairs = Array.from({ length: count }, () => `${keys[random(keys.length)] as string}: ${value(depth)}`);
+      return random(2) === 0 ? `{${pairs.join(", ")}}` : `[${pairs.map((pair) => `{${pair}}`).join(", ")}, {${pairs.join(", ")}}]`;
+    };
+    let duplicates = 0;
+    let clean = 0;
+    for (let round = 0; round < 600; round += 1) {
+      const block = random(3) === 0;
+      const text = block
+        ? Array.from({ length: 1 + random(5) }, () => `${keys[random(keys.length)] as string}: ${value(2)}`).join("\n")
+        : collection(0);
+      const loose = parseDocument(text, { schema: "core", uniqueKeys: false });
+      if (loose.errors.length > 0) continue;
+      const library = parseDocument(text, { schema: "core", uniqueKeys: true }).errors.some((error) => error.message.includes("Map keys must be unique"));
+      const ours = refuses(text);
+      expect(ours?.includes("duplicate key") ?? false, text).toBe(library);
+      if (library) duplicates += 1;
+      else clean += 1;
+    }
+    expect(duplicates).toBeGreaterThan(40);
+    expect(clean).toBeGreaterThan(40);
+  }, 30_000);
+});
+
+describe("a bracket inside a plain scalar never opens a flow collection", () => {
+  it("many scalars with an unclosed bracket stay 400-free", async () => {
+    const call = caller({ databases: { d: seeded() } });
+    const inline = Array.from({ length: 300 }, (_, index) => `k${index.toString()}: a [b`).join("\n");
+    expect(nesting(inline)).toBeUndefined();
+    const sequence = `values:\n${Array.from({ length: 300 }, (_, index) => `  - note ${index.toString()} see [1`).join("\n")}`;
+    expect(nesting(sequence)).toBeUndefined();
+    for (const text of [`${inline}\n`, sequence]) expect(parseDocument(text).errors).toHaveLength(0);
+    expect(nesting(Array.from({ length: 300 }, () => "k: x{y").join("\n"))).toBeUndefined();
+    // the real query: an unclosed bracket in a value, behind many other lines
+    const query = `from: {name: users}\nwhere: {op: ==, left: {field: name}, right: {value: "Ann [x"}}\n${Array.from({ length: 300 }, (_, index) => `# see [${index.toString()}`).join("\n")}\n`;
+    expect((await call("POST", path, query)).status).toBe(200);
+  });
+
+  it("opens only where a node can start: line start, after `: `, `- `, `? `, `,`, tags and anchors", () => {
+    const deep = "[".repeat(300);
+    for (const prefix of ["", "k: ", "- ", "? ", "k: !!seq ", "k: &x ", "k: !t &x ", "- - "]) expect(nesting(prefix + deep), prefix).toContain("nesting too deep");
+    expect(nesting(`{a: ${"[".repeat(300)}`)).toContain("nesting too deep");
+    expect(nesting(`[a, ${"[".repeat(300)}`)).toContain("nesting too deep");
+    expect(nesting(`{"a":${"[".repeat(300)}`)).toContain("nesting too deep");
+    // an apostrophe inside a plain scalar opens no quote, so the deep line after it is still seen
+    expect(nesting(`k: it's x\n${deep}`)).toContain("nesting too deep");
+    // a quote opens after a flow comma
+    expect(nesting(`[a, '${deep}']`)).toBeUndefined();
+    expect(nesting(`k: x${deep}`)).toBeUndefined();
+    expect(nesting(`k: x ${deep}`)).toBeUndefined();
+    expect(nesting(`k: x:y ${deep}`)).toBeUndefined();
+    expect(nesting(`k: ?x ${deep}`)).toBeUndefined();
+  });
+
+  it("agrees with the parser on seeded random documents with brackets in plain, quoted and commented text", () => {
+    let state = 7;
+    const random = (limit: number): number => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return (state >>> 8) % limit;
+    };
+    const scalars = ["a [b", "see [1", "x{y", "plain # [[[", '"[[[ \\" {{"', "'{{ it''s [['", "1", "[1, [2], {a: 3}]", "{a: [1, 2]}", "it's [", "a]b}c", "k [ 'q' ]", "!!str [x", "&anc [y"];
+    for (let round = 0; round < 200; round += 1) {
+      const lines: string[] = [];
+      for (let line = 0; line < 280 + random(60); line += 1) {
+        const scalar = scalars[random(scalars.length)] as string;
+        lines.push(random(2) === 0 ? `k${line.toString()}: ${scalar}` : random(2) === 0 ? `# [[ ${scalar}` : `k${line.toString()}:\n  - ${scalar}`);
+      }
+      const text = lines.join("\n");
+      if (parseDocument(text, { schema: "core" }).errors.length > 0) continue;
+      expect(nesting(text), text.slice(0, 200)).toBeUndefined();
+    }
+  }, 30_000);
+});
+
+describe("the scanner's depth equals the parsed depth at the limit", () => {
+  it("accepts 256 nested sequences, refuses 257", () => {
+    expect(nesting(`${"- ".repeat(256)}x`)).toBeUndefined();
+    expect(nesting(`${"- ".repeat(257)}x`)).toContain("nesting too deep");
+    expect(() => parseYamlDocument(`${"- ".repeat(256)}x`)).not.toThrow();
+    expect(() => parseYamlDocument(`${"- ".repeat(257)}x`)).toThrow(/nesting too deep/u);
+  });
+});
+
+describe("size options are validated", () => {
+  it("rejects NaN, negative, zero, fractional and infinite limits with a TypeError", () => {
+    for (const name of ["maxBodyBytes", "maxDtqlBytes"] as const) {
+      for (const bad of [Number.NaN, -1, 0, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
+        expect(() => createOvdbFetch({ databases: {}, [name]: bad }), `${name}=${String(bad)}`).toThrow(TypeError);
+      }
+      expect(() => createOvdbFetch({ databases: {}, [name]: 1 })).not.toThrow();
+    }
+    expect(() => createOvdbFetch({ databases: {}, maxDtqlBytes: Number.NaN })).toThrow(/maxDtqlBytes must be a positive safe integer/u);
+  });
+});
+
+describe("an over-limit body is cancelled, not drained", () => {
+  it("cancels the stream once the DTQL cap is passed", async () => {
+    const fetch = createOvdbFetch({ databases: { d: seeded() }, maxDtqlBytes: 100 });
+    let cancelled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < 50; index += 1) controller.enqueue(new Uint8Array(64));
+      },
+      cancel() {
+        cancelled += 1;
+      },
+    });
+    const response = await fetch(`${base}${path}`, { method: "POST", body: stream, duplex: "half" } as RequestInit);
+    expect(response.status).toBe(413);
+    expect(cancelled).toBe(1);
   });
 });

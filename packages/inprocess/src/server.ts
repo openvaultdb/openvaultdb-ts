@@ -437,7 +437,15 @@ class InProcessServer {
  * routes, statuses and error envelopes of `ovdb serve`, and never touches the
  * network: a request to any other origin is rejected.
  */
+function checkLimit(name: string, value: number | undefined): void {
+  if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
+    throw new TypeError(`${name} must be a positive safe integer, got ${String(value)}`);
+  }
+}
+
 export function createOvdbFetch(options: CreateOvdbFetchOptions): typeof globalThis.fetch {
+  checkLimit("maxBodyBytes", options.maxBodyBytes);
+  checkLimit("maxDtqlBytes", options.maxDtqlBytes);
   const base = new URL(options.baseUrl ?? defaultBaseUrl);
   const prefix = base.pathname.replace(/\/$/u, "");
   const server = new InProcessServer(options, base.origin + prefix);

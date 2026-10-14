@@ -89,8 +89,10 @@ Beyond the Go server's behaviour, this server also:
   the YAML library parses a whole document before its depth can be checked;
 - refuses a DTQL document nested deeper than 256 levels (flow or block style)
   with `400 invalid_dtql` from a linear pre-parse scan, parses it with the core
-  schema only (no custom tags, merge keys or duplicate keys) and refuses an
-  unresolved tag;
+  schema only (no custom tags, merge keys or duplicate keys; duplicates are
+  found in linear time) and refuses an unresolved or mismatched tag
+  (`!!js/function`, `!!float 1`); `maxBodyBytes` and `maxDtqlBytes` must be
+  positive safe integers, else `createOvdbFetch` throws a `TypeError`;
 - answers `403 read_denied` for reads (record `GET`/`HEAD`, query, DTQL) of a
   database whose capabilities say `read: false` (`ovdb serve` has no such
   denial, so the code is this server's own);

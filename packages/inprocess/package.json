@@ -37,7 +37,7 @@
     "node": ">=20"
   },
   "peerDependencies": {
-    "@dalgo/core": ">=0.8.0 <0.9.0"
+    "@dalgo/core": ">=0.7.4 <0.9.0"
   },
   "dependencies": {
     "yaml": "2.8.2"

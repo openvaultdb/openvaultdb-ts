@@ -17,6 +17,29 @@ const response = await fetch("https://local.ovdb.invalid/v1/databases/chinook/re
 `baseUrl` defaults to `https://local.ovdb.invalid`. A request to any other
 origin is rejected, so the fetch never reaches the network.
 
+## Installing
+
+Requires `@dalgo/core` `>=0.7.4 <0.9.0` as a peer. The supported package
+manager is pnpm 11; npm is not supported. This package is released through the
+changesets workflow of this repository, so it is on npm only once a release has
+been published. `@dalgo/core` with the capabilities types, and the `@dalgo/ovdb`
+CRUD client used by this repository's tests (`@dalgo/ovdb/client`), are not yet
+published, so this repository and any consumer of unreleased builds pin them
+from GitHub:
+
+```jsonc
+// package.json
+"@dalgo/core": "github:dal-go/dalgo-js#24eb5b7ef8f044c274cb33beda353b2413e17c42",
+"@dalgo/ovdb": "github:dal-go/dalgo-http-adapters#28bc59754f068335d08fb31c7aae5216b9f8bf56&path:/packages/ovdb"
+```
+
+```yaml
+# pnpm-workspace.yaml: the GitHub tarballs build themselves on install
+allowBuilds:
+  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42': true
+  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56#path:/packages/ovdb': true
+```
+
 ## Capabilities
 
 The database descriptor (`GET /v1/databases/{db}`) and discovery

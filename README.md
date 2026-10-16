@@ -1,11 +1,9 @@
 # openvaultdb-ts
 TypeScript SDK for [OpenVaultDB](https://openvaultdb.com/) — DTQL queries, schema management, authentication, and access to user-owned application databases.
 
-## Flagship ecosystem product
+## TypeScript SDK and DataTug session storage
 
-The OpenVaultDB session-storage architecture for DataTug is under development around the Go implementation; this TypeScript SDK is not described as DataTug’s runtime.
-
-DataTug is the flagship ecosystem product. [Explore DataTug](https://datatug.app), and read [how we built its development tools](https://datatug.app/en/under-the-hood/tools-we-built/) for the open-source tools and standards behind it.
+[DataTug](https://datatug.app)’s in-progress OpenVaultDB session-storage architecture currently centers on Go; this repository is the separate TypeScript SDK. Read [how DataTug’s development tools were built](https://datatug.app/en/under-the-hood/tools-we-built/).
 
 ## Packages
 

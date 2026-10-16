@@ -1,6 +1,6 @@
 {
   "name": "@openvaultdb/inprocess",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "In-process OpenVaultDB server exposed as a standard fetch over local DALgo databases",
   "type": "module",
   "sideEffects": false,

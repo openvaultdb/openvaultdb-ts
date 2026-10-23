@@ -4,10 +4,10 @@ packages:
 # Unreleased upstream builds, pinned to landed commits (no sibling links, so CI
 # resolves them). Drop each override once the package is published.
 overrides:
-  "@dalgo/core": "github:dal-go/dalgo-js#24eb5b7ef8f044c274cb33beda353b2413e17c42"
-  "@dalgo/ovdb": "github:dal-go/dalgo-http-adapters#28bc59754f068335d08fb31c7aae5216b9f8bf56&path:/packages/ovdb"
+  "@dalgo/core": "github:dal-go/dalgo-js#99165e9e1a39c32abee2b39d6395677843bc3559"
+  "@dalgo/ovdb": "github:dal-go/dalgo-http-adapters#19684666326c9f03c2824f28040c4449277a2f7c&path:/packages/ovdb"
 
 # The GitHub tarballs build themselves on install (prepack).
 allowBuilds:
-  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42': true
-  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56#path:/packages/ovdb': true
+  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559': true
+  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/19684666326c9f03c2824f28040c4449277a2f7c#path:/packages/ovdb': true

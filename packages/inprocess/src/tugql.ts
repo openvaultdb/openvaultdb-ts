@@ -1,12 +1,12 @@
 import type { QueryFilter, QueryOperator, QueryOrder, StructuredQuery } from "@dalgo/core";
 import { isMap, isScalar as isYamlScalar, isSeq, parseDocument } from "yaml";
-import { invalidDtql, OvdbHttpError } from "./http.js";
+import { invalidTugql, OvdbHttpError } from "./http.js";
 import { validateCollection } from "./keys.js";
 import { isObject, maxNesting, nestsTooDeep } from "./updates.js";
 
 type Data = Record<string, unknown>;
 
-/** Bounds of the single-collection DTQL profile (docs/api.md, "DTQL"). */
+/** Bounds of the single-collection TugQL profile (docs/api.md, "TugQL"). */
 export const maxLimit = 1000;
 export const maxOffset = 10_000;
 const maxParameters = 64;
@@ -38,24 +38,24 @@ function isScalar(value: unknown): boolean {
 }
 
 function bindValue(name: string, value: unknown): Data {
-  if (value === null) throw invalidDtql(`parameter ${JSON.stringify(name)} cannot be null`);
+  if (value === null) throw invalidTugql(`parameter ${JSON.stringify(name)} cannot be null`);
   if (Array.isArray(value)) {
-    if (value.length > maxParameterValues) throw invalidDtql(`parameter ${JSON.stringify(name)} has too many values`);
-    if (!value.every(isScalar)) throw invalidDtql(`parameter ${JSON.stringify(name)} must contain only non-null scalars`);
+    if (value.length > maxParameterValues) throw invalidTugql(`parameter ${JSON.stringify(name)} has too many values`);
+    if (!value.every(isScalar)) throw invalidTugql(`parameter ${JSON.stringify(name)} must contain only non-null scalars`);
     return { values: value };
   }
-  if (!isScalar(value)) throw invalidDtql(`parameter ${JSON.stringify(name)} must be a scalar or array`);
+  if (!isScalar(value)) throw invalidTugql(`parameter ${JSON.stringify(name)} must be a scalar or array`);
   return { value };
 }
 
-/** Replaces each `{param: Name}` node with its bound value, as bindDTQLParameters does. */
+/** Replaces each `{param: Name}` node with its bound value, as bindTugQLParameters does. */
 function bind(node: unknown, parameters: Data, used: Set<string>): unknown {
   if (Array.isArray(node)) return node.map((item) => bind(item, parameters, used));
   if (!isObject(node)) return node;
   const keys = Object.keys(node);
   if (keys.length === 1 && keys[0] === "param") {
     const name = String(node.param);
-    if (!Object.hasOwn(parameters, name)) throw invalidDtql(`parameter ${JSON.stringify(name)} is not bound`);
+    if (!Object.hasOwn(parameters, name)) throw invalidTugql(`parameter ${JSON.stringify(name)} is not bound`);
     used.add(name);
     return bindValue(name, parameters[name]);
   }
@@ -67,7 +67,7 @@ const isBlank = (code: number): boolean => code === space || code === 9 || code 
 const isFlowIndicator = (code: number): boolean => code === 44 || code === 91 || code === 93 || code === 123 || code === 125;
 
 /**
- * Refuses, in one linear pass and before the YAML library sees the text, a DTQL
+ * Refuses, in one linear pass and before the YAML library sees the text, a TugQL
  * document that nests deeper than maxNesting: flow collections (`[` and `{`)
  * count one level each, block collections one level per distinct indentation
  * (or `- ` marker) on a line. A flow collection opens only where a node can
@@ -81,7 +81,7 @@ const isFlowIndicator = (code: number): boolean => code === 44 || code === 91 ||
  */
 export function scanNesting(text: string): void {
   const tooDeep = (): never => {
-    throw invalidDtql("invalid DTQL YAML: nesting too deep");
+    throw invalidTugql("invalid TugQL YAML: nesting too deep");
   };
   const indents: number[] = [];
   const end = text.length;
@@ -190,7 +190,7 @@ function rejectDuplicateKeys(root: unknown): void {
 }
 
 /**
- * Parses a DTQL YAML document with the core schema only: no merge keys, at most
+ * Parses a TugQL YAML document with the core schema only: no merge keys, at most
  * 100 aliases, no duplicate keys; any warning is refused, so an unresolved or
  * mismatched tag such as `!!js/function` or `!!float 1` never reaches a loader.
  * (customTags: [] equals the core schema's default and only states the intent.)
@@ -206,28 +206,28 @@ export function parseYamlDocument(text: string): unknown {
     rejectDuplicateKeys(parsed.contents);
     document = parsed.toJS({ maxAliasCount: 100 }) as unknown;
   } catch (error) {
-    throw invalidDtql(`invalid DTQL YAML: ${(error as Error).message}`);
+    throw invalidTugql(`invalid TugQL YAML: ${(error as Error).message}`);
   }
-  if (nestsTooDeep(document)) throw invalidDtql("invalid DTQL YAML: nesting too deep");
+  if (nestsTooDeep(document)) throw invalidTugql("invalid TugQL YAML: nesting too deep");
   return document;
 }
 
 /**
- * Reads the DTQL document of a JSON request (`{"query": "<YAML>", "parameters": {...}}`)
+ * Reads the TugQL document of a JSON request (`{"query": "<YAML>", "parameters": {...}}`)
  * and binds its parameters as values, never as text.
  */
 export function bindJsonDocument(payload: unknown): unknown {
   if (!isObject(payload) || Object.keys(payload).some((key) => key !== "query" && key !== "parameters")) {
-    throw invalidDtql("invalid DTQL JSON: the body holds only query and parameters");
+    throw invalidTugql("invalid TugQL JSON: the body holds only query and parameters");
   }
   const { query, parameters = {} } = payload;
-  if (typeof query !== "string" || query.trim() === "") throw invalidDtql("query must contain DTQL YAML");
-  if (!isObject(parameters)) throw invalidDtql("invalid DTQL JSON: parameters must be an object");
-  if (Object.keys(parameters).length > maxParameters) throw invalidDtql("too many DTQL parameters");
+  if (typeof query !== "string" || query.trim() === "") throw invalidTugql("query must contain TugQL YAML");
+  if (!isObject(parameters)) throw invalidTugql("invalid TugQL JSON: parameters must be an object");
+  if (Object.keys(parameters).length > maxParameters) throw invalidTugql("too many TugQL parameters");
   const used = new Set<string>();
   const document = bind(parseYamlDocument(query), parameters, used);
   for (const name of Object.keys(parameters)) {
-    if (!used.has(name)) throw invalidDtql(`parameter ${JSON.stringify(name)} is not used`);
+    if (!used.has(name)) throw invalidTugql(`parameter ${JSON.stringify(name)} is not used`);
   }
   return document;
 }
@@ -243,64 +243,64 @@ function given(value: unknown): unknown {
 }
 
 function plainField(value: unknown, context: string): string {
-  if (!isObject(value)) throw invalidDtql(`${context} must be an object`);
+  if (!isObject(value)) throw invalidTugql(`${context} must be an object`);
   if (Object.hasOwn(value, "source") || Object.hasOwn(value, "query")) relational();
   if (!Object.hasOwn(value, "field")) relational();
-  if (Object.keys(value).length !== 1) throw invalidDtql(`unsupported ${context} key`);
-  if (typeof value.field !== "string" || value.field === "") throw invalidDtql(`${context}.field must be a non-empty string`);
-  if (value.field === "__proto__") throw invalidDtql(`${context}.field "__proto__" is not allowed`);
+  if (Object.keys(value).length !== 1) throw invalidTugql(`unsupported ${context} key`);
+  if (typeof value.field !== "string" || value.field === "") throw invalidTugql(`${context}.field must be a non-empty string`);
+  if (value.field === "__proto__") throw invalidTugql(`${context}.field "__proto__" is not allowed`);
   return value.field;
 }
 
 function comparison(value: Data): QueryFilter<Data> {
   if (Object.keys(value).some((key) => key !== "op" && key !== "left" && key !== "right")) {
-    throw invalidDtql("unsupported where key");
+    throw invalidTugql("unsupported where key");
   }
   const op = typeof value.op === "string" && Object.hasOwn(operators, value.op) ? operators[value.op] : undefined;
-  if (op === undefined) throw invalidDtql(`unsupported where operator ${String(value.op)}`);
+  if (op === undefined) throw invalidTugql(`unsupported where operator ${String(value.op)}`);
   const field = plainField(value.left, "where.left");
   const right = value.right;
-  if (!isObject(right)) throw invalidDtql("where.right must be an object");
+  if (!isObject(right)) throw invalidTugql("where.right must be an object");
   if (!Object.hasOwn(right, "value") && !Object.hasOwn(right, "values")) relational();
   const list = op === "in" || op === "not-in";
   const operand = list ? right.values : right.value;
   if (list ? !Array.isArray(operand) || !operand.every(isScalar) : !isScalar(operand)) {
-    throw invalidDtql(list ? "where values must be an array of portable scalars" : "where.right.value must be a portable scalar");
+    throw invalidTugql(list ? "where values must be an array of portable scalars" : "where.right.value must be a portable scalar");
   }
   return { field, operator: op, value: operand };
 }
 
 function conditions(value: unknown): QueryFilter<Data>[] {
-  if (!isObject(value)) throw invalidDtql("where must be an object");
+  if (!isObject(value)) throw invalidTugql("where must be an object");
   if (Object.hasOwn(value, "isNull") || Object.hasOwn(value, "isNotNull") || Object.hasOwn(value, "exists")) relational();
   if (Object.hasOwn(value, "or")) {
     throw new OvdbHttpError(422, "query_unsupported", "the storage engine cannot run this query");
   }
   if (Object.hasOwn(value, "and")) {
-    if (!Array.isArray(value.and) || value.and.length === 0) throw invalidDtql("where.and must be a non-empty array");
+    if (!Array.isArray(value.and) || value.and.length === 0) throw invalidTugql("where.and must be a non-empty array");
     return value.and.flatMap(conditions);
   }
   return [comparison(value)];
 }
 
 function orders(value: unknown): QueryOrder<Data>[] {
-  if (!Array.isArray(value)) throw invalidDtql("orderBy must be an array");
+  if (!Array.isArray(value)) throw invalidTugql("orderBy must be an array");
   return value.map((raw: unknown) => {
-    if (!isObject(raw)) throw invalidDtql("orderBy entries must be objects");
+    if (!isObject(raw)) throw invalidTugql("orderBy entries must be objects");
     const { desc, ...rest } = raw;
-    if (desc !== undefined && desc !== null && typeof desc !== "boolean") throw invalidDtql("orderBy.desc must be boolean");
+    if (desc !== undefined && desc !== null && typeof desc !== "boolean") throw invalidTugql("orderBy.desc must be boolean");
     return { field: plainField(rest, "orderBy"), direction: desc === true ? "desc" : "asc" };
   });
 }
 
 function bound(value: unknown, name: string, max: number): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalidDtql(`${name} must be a non-negative safe integer`);
-  if ((value as number) > max) throw invalidDtql(`${name} must not exceed ${max.toString()}`);
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw invalidTugql(`${name} must be a non-negative safe integer`);
+  if ((value as number) > max) throw invalidTugql(`${name} must not exceed ${max.toString()}`);
   return value as number;
 }
 
 /**
- * Classifies a DTQL document for a per-database endpoint. A document of one
+ * Classifies a TugQL document for a per-database endpoint. A document of one
  * plain collection becomes a DALgo structured query; any relational feature
  * (alias, join, grouping, aggregate, computed or qualified column, null test,
  * subquery) is refused as the Go server refuses it on an engine it does not
@@ -316,26 +316,26 @@ export function classifyDocument(document: unknown, databaseId: string): Collect
 }
 
 function collectionDocument(document: unknown, databaseId: string): CollectionDocument {
-  if (!isObject(document)) throw invalidDtql("invalid or unsupported DTQL query: a document must be a mapping");
-  for (const key of Object.keys(document)) if (!rootKeys.has(key)) throw invalidDtql(`unsupported DTQL action key ${key}`);
+  if (!isObject(document)) throw invalidTugql("invalid or unsupported TugQL query: a document must be a mapping");
+  for (const key of Object.keys(document)) if (!rootKeys.has(key)) throw invalidTugql(`unsupported TugQL action key ${key}`);
   const from = document.from;
-  if (!isObject(from)) throw invalidDtql("from must be an object");
-  for (const key of Object.keys(from)) if (!fromKeys.has(key)) throw invalidDtql(`unsupported from key ${key}`);
+  if (!isObject(from)) throw invalidTugql("from must be an object");
+  for (const key of Object.keys(from)) if (!fromKeys.has(key)) throw invalidTugql(`unsupported from key ${key}`);
   if (given(from.joins) !== undefined || given(from.alias) !== undefined || given(from.as) !== undefined
     || given(from.scan) !== undefined || given(document.groupBy) !== undefined
     || given(document.having) !== undefined || given(document.money) !== undefined) {
     relational();
   }
   if (from.database !== undefined && from.database !== null && from.database !== databaseId) {
-    throw invalidDtql(`collection ${JSON.stringify(from.name)} names database ${JSON.stringify(from.database)}; this endpoint reads database ${JSON.stringify(databaseId)}`);
+    throw invalidTugql(`collection ${JSON.stringify(from.name)} names database ${JSON.stringify(from.database)}; this endpoint reads database ${JSON.stringify(databaseId)}`);
   }
-  if (from.schema !== undefined && from.schema !== null) throw invalidDtql("a schema-qualified source is not supported by this engine");
-  if (typeof from.name !== "string") throw invalidDtql("from.name must be a string");
+  if (from.schema !== undefined && from.schema !== null) throw invalidTugql("a schema-qualified source is not supported by this engine");
+  if (typeof from.name !== "string") throw invalidTugql("from.name must be a string");
   validateCollection(from.name);
   const where = given(document.where);
   const orderBy = given(document.orderBy);
   const rawColumns = given(document.columns);
-  if (rawColumns !== undefined && !Array.isArray(rawColumns)) throw invalidDtql("columns must be an array");
+  if (rawColumns !== undefined && !Array.isArray(rawColumns)) throw invalidTugql("columns must be an array");
   const columns = rawColumns?.map((column: unknown) => plainField(column, "columns"));
   const limit = given(document.limit) === undefined ? 0 : bound(document.limit, "limit", maxLimit);
   const offset = given(document.offset) === undefined ? 0 : bound(document.offset, "offset", maxOffset);

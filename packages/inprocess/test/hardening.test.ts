@@ -72,12 +72,12 @@ describe("prototype pollution is refused (400) and Object.prototype stays untouc
     expect(Object.hasOwn(db.store.get("users/a")?.data ?? {}, "toString")).toBe(true);
   });
 
-  it("query and DTQL field names of __proto__ are refused", async () => {
+  it("query and TugQL field names of __proto__ are refused", async () => {
     const call = caller({ databases: { d: seeded() } });
     expect(await call("POST", "/v1/databases/d/query", { collection: "users", where: [{ field: "__proto__", op: "==", value: 1 }] }))
       .toMatchObject({ status: 400, body: refusal("bad_request") });
-    expect(await call("POST", "/v1/databases/d/dtql", { query: "from: {name: users}\ncolumns: [{field: __proto__}]" }, { "Content-Type": "application/json" }))
-      .toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+    expect(await call("POST", "/v1/databases/d/tugql", { query: "from: {name: users}\ncolumns: [{field: __proto__}]" }, { "Content-Type": "application/json" }))
+      .toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     expectPrototypeUntouched();
   });
 
@@ -92,14 +92,14 @@ describe("prototype pollution is refused (400) and Object.prototype stays untouc
 describe("request body limit (413 payload_too_large)", () => {
   const big = { data: { pad: "x".repeat(300) } };
 
-  it("refuses record, batch, query and DTQL bodies over maxBodyBytes while reading", async () => {
+  it("refuses record, batch, query and TugQL bodies over maxBodyBytes while reading", async () => {
     const call = caller({ databases: { d: seeded() }, maxBodyBytes: 200 });
     expect(await call("PUT", "/v1/databases/d/records/users/b", big)).toMatchObject({ status: 413, body: refusal("payload_too_large") });
     expect(await call("POST", "/v1/databases/d/batch", { ops: [{ op: "set", key: "users/b", data: big.data }] }))
       .toMatchObject({ status: 413, body: refusal("payload_too_large") });
     expect(await call("POST", "/v1/databases/d/query", { collection: "users", pad: big.data.pad }))
       .toMatchObject({ status: 413, body: refusal("payload_too_large") });
-    expect(await call("POST", "/v1/databases/d/dtql", `from: {name: users}\n#${big.data.pad}`)).toMatchObject({ status: 413 });
+    expect(await call("POST", "/v1/databases/d/tugql", `from: {name: users}\n#${big.data.pad}`)).toMatchObject({ status: 413 });
   });
 
   it("refuses by a declared Content-Length before reading, and stops a chunked body that grows past the limit", async () => {
@@ -143,13 +143,13 @@ describe("request body limit (413 payload_too_large)", () => {
 describe("read: false is enforced", () => {
   const noRead = { ...writable, read: false };
 
-  it("answers 403 read_denied for record GET/HEAD, query and DTQL, while the descriptor and writes still work", async () => {
+  it("answers 403 read_denied for record GET/HEAD, query and TugQL, while the descriptor and writes still work", async () => {
     const call = caller({ databases: { d: new MapDatabase(noRead, { "users/a": { n: 1 } }) } });
     expect(await call("GET", "/v1/databases/d/records/users/a")).toMatchObject({ status: 403, body: refusal("read_denied") });
     expect(await call("HEAD", "/v1/databases/d/records/users/a")).toMatchObject({ status: 403, body: undefined });
     expect(await call("POST", "/v1/databases/d/query", { collection: "users" })).toMatchObject({ status: 403, body: refusal("read_denied") });
     expect(await call("GET", "/v1/databases/d/query?q=%7B%22collection%22%3A%22users%22%7D")).toMatchObject({ status: 403 });
-    expect(await call("POST", "/v1/databases/d/dtql", "from: {name: users}")).toMatchObject({ status: 403, body: refusal("read_denied") });
+    expect(await call("POST", "/v1/databases/d/tugql", "from: {name: users}")).toMatchObject({ status: 403, body: refusal("read_denied") });
     expect((await call("GET", "/v1/databases/d")).status).toBe(200);
     expect((await call("PUT", "/v1/databases/d/records/users/b", { data: {} })).status).toBe(204);
   });
@@ -158,7 +158,7 @@ describe("read: false is enforced", () => {
 describe("HEAD on GET routes", () => {
   it("answers the status and headers of GET with no body", async () => {
     const call = caller({ databases: { d: seeded() } });
-    for (const path of ["/.well-known/openvaultdb", "/v1/databases/d", "/v1/databases/d/query?q=%7B%22collection%22%3A%22users%22%7D", "/v1/databases/d/dtql?q=from%3A%20%7Bname%3A%20users%7D"]) {
+    for (const path of ["/.well-known/openvaultdb", "/v1/databases/d", "/v1/databases/d/query?q=%7B%22collection%22%3A%22users%22%7D", "/v1/databases/d/tugql?q=from%3A%20%7Bname%3A%20users%7D"]) {
       const answer = await call("HEAD", path);
       expect(answer.status).toBe(200);
       expect(answer.body).toBeUndefined();
@@ -227,7 +227,7 @@ describe("snapshot capacity is reserved atomically", () => {
       return real(query);
     };
     const call = caller({ databases: { d: db } });
-    const first = (): Promise<unknown> => call("POST", "/v1/databases/d/dtql", { query: "from: {name: users}" }, {
+    const first = (): Promise<unknown> => call("POST", "/v1/databases/d/tugql", { query: "from: {name: users}" }, {
       "Content-Type": "application/json", "OVDB-Page-Size": "1",
     });
     const started = [first(), first(), first(), first()];
@@ -240,7 +240,7 @@ describe("snapshot capacity is reserved atomically", () => {
     const second = new MapDatabase(readOnlyCapabilities, { "users/a": { n: 1 } });
     second.query = () => Promise.reject(new Error("boom"));
     const again = caller({ databases: { d: second } });
-    const attempt = (): Promise<{ status: number }> => again("POST", "/v1/databases/d/dtql", { query: "from: {name: users}" }, {
+    const attempt = (): Promise<{ status: number }> => again("POST", "/v1/databases/d/tugql", { query: "from: {name: users}" }, {
       "Content-Type": "application/json", "OVDB-Page-Size": "1",
     });
     expect((await attempt()).status).toBe(500);

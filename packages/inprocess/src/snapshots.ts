@@ -1,7 +1,7 @@
 import { OvdbHttpError } from "./http.js";
 import type { Row } from "./query.js";
 
-/** Bounds of result snapshot paging (docs/api.md, "DTQL", and dtql_pages.go). */
+/** Bounds of result snapshot paging (docs/api.md, "TugQL", and tugql_pages.go). */
 const lifetimeMs = 5 * 60 * 1000;
 const maxSnapshots = 2;
 export const maxSnapshotRows = 1_000_000;
@@ -38,7 +38,7 @@ function newId(): string {
 }
 
 /**
- * Captured DTQL results served page by page. The Go server spools a capture to
+ * Captured TugQL results served page by page. The Go server spools a capture to
  * a private file; an in-process capture is the rows in memory, released on
  * close, on expiry five minutes after capture, or when the fetch is dropped.
  */

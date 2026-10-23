@@ -6,12 +6,12 @@ import {
   type DatabaseCapabilities,
   type Resettable,
 } from "@dalgo/core";
-import { bindJsonDocument, classifyDocument, maxLimit, maxOffset, parseYamlDocument, project, type CollectionDocument } from "./dtql.js";
+import { bindJsonDocument, classifyDocument, maxLimit, maxOffset, parseYamlDocument, project, type CollectionDocument } from "./tugql.js";
 import {
   badRequest,
   emptyResponse,
   errorResponse,
-  invalidDtql,
+  invalidTugql,
   invalidKey,
   jsonResponse,
   mapError,
@@ -51,18 +51,18 @@ export interface CreateOvdbFetchOptions {
   /** The largest request body accepted, in bytes (default 8 MiB); a larger one is answered 413 payload_too_large. */
   readonly maxBodyBytes?: number;
   /**
-   * The largest DTQL/YAML document accepted, in bytes (default 256 KiB), checked while
+   * The largest TugQL/YAML document accepted, in bytes (default 256 KiB), checked while
    * reading and before any parsing; a larger one is answered 413 payload_too_large.
-   * It also bounds a DTQL body below maxBodyBytes, which still caps record and batch bodies.
+   * It also bounds a TugQL body below maxBodyBytes, which still caps record and batch bodies.
    */
-  readonly maxDtqlBytes?: number;
+  readonly maxTugqlBytes?: number;
 }
 
 export const defaultBaseUrl = "https://local.ovdb.invalid";
 
 export const defaultMaxBodyBytes = 8 << 20;
-export const defaultMaxDtqlBytes = 256 << 10;
-const maxDtqlUrlBytes = 8 << 10;
+export const defaultMaxTugqlBytes = 256 << 10;
+const maxTugqlUrlBytes = 8 << 10;
 
 /** The 405 for `method`, naming the methods the route does allow (a GET route allows HEAD too). */
 const methodNotAllowed = (method: string, allowed: readonly string[]): OvdbHttpError => {
@@ -73,7 +73,7 @@ const methodNotAllowed = (method: string, allowed: readonly string[]): OvdbHttpE
 const recordMethods = ["GET", "PUT", "POST", "PATCH", "DELETE"] as const;
 
 const queryProfile = {
-  format: "dtql-yaml+json",
+  format: "tugql-yaml+json",
   features: {
     streaming: true,
     completionField: "complete",
@@ -103,9 +103,9 @@ async function wireCapabilities(db: OvdbDatabase): Promise<Readonly<Record<strin
   return {
     read: capabilities.read,
     query: capabilities.query,
-    dtql: capabilities.query,
-    dtqlStreaming: capabilities.query,
-    dtqlStreamingErrors: false,
+    tugql: capabilities.query,
+    tugqlStreaming: capabilities.query,
+    tugqlStreamingErrors: false,
     write: capabilities.write,
     delete: capabilities.delete,
     reset: capabilities.reset && isResettable(db),
@@ -174,13 +174,13 @@ class InProcessServer {
   readonly #base: string;
   readonly #snapshots = new SnapshotStore();
   readonly #limit: number;
-  readonly #dtqlLimit: number;
+  readonly #tugqlLimit: number;
 
   public constructor(options: CreateOvdbFetchOptions, base: string) {
     this.#options = options;
     this.#base = base;
     this.#limit = options.maxBodyBytes ?? defaultMaxBodyBytes;
-    this.#dtqlLimit = Math.min(this.#limit, options.maxDtqlBytes ?? defaultMaxDtqlBytes);
+    this.#tugqlLimit = Math.min(this.#limit, options.maxTugqlBytes ?? defaultMaxTugqlBytes);
   }
 
   /** Answers `request`; `method` is what the caller asked, which differs from request.method for a HEAD served as a GET. */
@@ -196,7 +196,7 @@ class InProcessServer {
     const rest = match[2] ?? "";
     if (rest.startsWith("/records/")) return this.#record(request, db, rest.slice("/records/".length));
     const routes: Readonly<Record<string, readonly string[]>> = {
-      "": ["GET"], "/batch": ["POST"], "/query": ["GET", "POST"], "/dtql": ["GET", "POST"], "/reset": ["POST"],
+      "": ["GET"], "/batch": ["POST"], "/query": ["GET", "POST"], "/tugql": ["GET", "POST"], "/reset": ["POST"],
     };
     const methods = routes[rest];
     if (methods === undefined) throw notFound("not found");
@@ -208,8 +208,8 @@ class InProcessServer {
         return this.#batch(request, db);
       case "/query":
         return this.#query(request, url, id, db);
-      case "/dtql":
-        return this.#dtql(request, url, id, db);
+      case "/tugql":
+        return this.#tugql(request, url, id, db);
       default:
         return this.#reset(id, db);
     }
@@ -257,8 +257,8 @@ class InProcessServer {
       schemaMode: "schemaless",
       collections: [],
       capabilities,
-      ...(capabilities.dtql === true
-        ? { endpoints: { dtql: `${this.#base}/v1/databases/${encodeURIComponent(id)}/dtql` }, queryFormat: "dtql-yaml+json" }
+      ...(capabilities.tugql === true
+        ? { endpoints: { tugql: `${this.#base}/v1/databases/${encodeURIComponent(id)}/tugql` }, queryFormat: "tugql-yaml+json" }
         : {}),
       ...(resettable && canonical !== undefined ? { canonical } : {}),
       ...(resettable && this.#options.localState !== undefined ? { localState: this.#options.localState(id) } : {}),
@@ -353,24 +353,24 @@ class InProcessServer {
     return jsonResponse({ records, complete: true });
   }
 
-  async #dtqlDocument(request: Request, url: URL): Promise<unknown> {
+  async #tugqlDocument(request: Request, url: URL): Promise<unknown> {
     if (request.method === "GET") {
-      if (url.pathname.length + url.search.length > maxDtqlUrlBytes) {
-        throw new OvdbHttpError(414, "bad_request", "DTQL URL exceeds 8 KiB limit");
+      if (url.pathname.length + url.search.length > maxTugqlUrlBytes) {
+        throw new OvdbHttpError(414, "bad_request", "TugQL URL exceeds 8 KiB limit");
       }
       for (const name of url.searchParams.keys()) {
-        if (name !== "q" && name !== "parameters") throw badRequest(`unsupported DTQL URL parameter ${JSON.stringify(name)}`);
+        if (name !== "q" && name !== "parameters") throw badRequest(`unsupported TugQL URL parameter ${JSON.stringify(name)}`);
       }
       const q = url.searchParams.getAll("q");
-      if (q.length !== 1 || (q[0] as string).trim() === "") throw badRequest("DTQL URL requires exactly one nonempty q parameter");
+      if (q.length !== 1 || (q[0] as string).trim() === "") throw badRequest("TugQL URL requires exactly one nonempty q parameter");
       const raw = url.searchParams.getAll("parameters");
       let parameters: unknown = {};
       if (raw.length > 0) {
-        if (raw.length !== 1 || raw[0] === "") throw badRequest("DTQL URL requires one JSON parameters object");
+        if (raw.length !== 1 || raw[0] === "") throw badRequest("TugQL URL requires one JSON parameters object");
         try {
           parameters = JSON.parse(raw[0] as string) as unknown;
         } catch {
-          throw badRequest("DTQL URL parameters must be a JSON object");
+          throw badRequest("TugQL URL parameters must be a JSON object");
         }
       }
       try {
@@ -379,25 +379,25 @@ class InProcessServer {
         throw badRequest((error as Error).message);
       }
     }
-    const text = await readBody(request, this.#dtqlLimit, "DTQL document (maxDtqlBytes)");
-    if (text === "") throw badRequest("body must contain a DTQL YAML document");
+    const text = await readBody(request, this.#tugqlLimit, "TugQL document (maxTugqlBytes)");
+    if (text === "") throw badRequest("body must contain a TugQL YAML document");
     const contentType = (request.headers.get("Content-Type") ?? "").replace(/;.*$/su, "").trim().toLowerCase();
     if (contentType !== "application/json") return parseYamlDocument(text);
     let payload: unknown;
     try {
       payload = JSON.parse(text) as unknown;
     } catch (error) {
-      throw invalidDtql(`invalid DTQL JSON: ${(error as Error).message}`);
+      throw invalidTugql(`invalid TugQL JSON: ${(error as Error).message}`);
     }
     return bindJsonDocument(payload);
   }
 
-  async #dtql(request: Request, url: URL, id: string, db: OvdbDatabase): Promise<Response> {
+  async #tugql(request: Request, url: URL, id: string, db: OvdbDatabase): Promise<Response> {
     await this.#guardQueries(id, db);
     await this.#guardReads(db);
-    const document = await this.#dtqlDocument(request, url);
+    const document = await this.#tugqlDocument(request, url);
     const classified = classifyDocument(document, id);
-    if (pagingHeaders(request)) return this.#pagedDtql(request, id, db, document, classified);
+    if (pagingHeaders(request)) return this.#pagedTugql(request, id, db, document, classified);
     const rows = await runQuery(db, classified.query);
     return jsonResponse({
       records: rows.map(({ key, data }) => ({ key, data: project(data, classified.columns) })),
@@ -405,13 +405,13 @@ class InProcessServer {
     });
   }
 
-  async #pagedDtql(
+  async #pagedTugql(
     request: Request, id: string, db: OvdbDatabase, document: unknown, classified: CollectionDocument,
   ): Promise<Response> {
     const size = request.headers.get("OVDB-Page-Size") ?? "";
     const pageSize = /^[0-9]{1,4}$/u.test(size) ? Number(size) : 0;
     if (pageSize < 1 || pageSize > 1000) throw badRequest("OVDB-Page-Size must be 1..1000");
-    if (classified.bounded) throw invalidDtql("paged DTQL requires limit and offset to be zero");
+    if (classified.bounded) throw invalidTugql("paged TugQL requires limit and offset to be zero");
     const scope: SnapshotScope = {
       databaseId: id,
       queryHash: JSON.stringify(document),
@@ -458,7 +458,7 @@ function checkLimit(name: string, value: number | undefined): void {
 
 export function createOvdbFetch(options: CreateOvdbFetchOptions): typeof globalThis.fetch {
   checkLimit("maxBodyBytes", options.maxBodyBytes);
-  checkLimit("maxDtqlBytes", options.maxDtqlBytes);
+  checkLimit("maxTugqlBytes", options.maxTugqlBytes);
   const base = new URL(options.baseUrl ?? defaultBaseUrl);
   const prefix = base.pathname.replace(/\/$/u, "");
   const server = new InProcessServer(options, base.origin + prefix);

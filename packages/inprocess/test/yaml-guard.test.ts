@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
-import { parseYamlDocument, scanNesting } from "../src/dtql.js";
-import { createOvdbFetch, defaultMaxDtqlBytes } from "../src/index.js";
+import { parseYamlDocument, scanNesting } from "../src/tugql.js";
+import { createOvdbFetch, defaultMaxTugqlBytes } from "../src/index.js";
 import { MapDatabase } from "./fake-database.js";
 import { base, caller, refusal } from "./helpers.js";
 
-const path = "/v1/databases/d/dtql";
+const path = "/v1/databases/d/tugql";
 const seeded = (): MapDatabase => new MapDatabase(undefined, { "users/a": { name: "Ann", n: 1 }, "users/b": { name: "Bob", n: 2 } });
 const jsonType = { "Content-Type": "application/json" };
 
@@ -27,9 +27,9 @@ const nesting = (text: string): string | undefined => {
   }
 };
 
-describe("DTQL document size cap (maxDtqlBytes), before any parsing", () => {
+describe("TugQL document size cap (maxTugqlBytes), before any parsing", () => {
   it("defaults to 256 KiB and refuses an 8 MiB flow-nesting body with 413 at once, reading little", async () => {
-    expect(defaultMaxDtqlBytes).toBe(256 << 10);
+    expect(defaultMaxTugqlBytes).toBe(256 << 10);
     const fetch = createOvdbFetch({ databases: { d: seeded() } });
     const flow = "[".repeat((8 << 20) - 1);
     let pulled = 0;
@@ -45,7 +45,7 @@ describe("DTQL document size cap (maxDtqlBytes), before any parsing", () => {
       expect(result.status).toBe(413);
       const error = ((await result.json()) as { error: { code: string; message: string } }).error;
       expect(error.code).toBe("payload_too_large");
-      expect(error.message).toBe(`DTQL document (maxDtqlBytes) exceeds ${defaultMaxDtqlBytes.toString()} bytes`);
+      expect(error.message).toBe(`TugQL document (maxTugqlBytes) exceeds ${defaultMaxTugqlBytes.toString()} bytes`);
       expect(ms).toBeLessThan(500);
       expect(heapMb).toBeLessThan(64);
     }
@@ -54,7 +54,7 @@ describe("DTQL document size cap (maxDtqlBytes), before any parsing", () => {
 
   it("accepts a body of exactly the cap and refuses one byte more, as YAML and as JSON", async () => {
     const cap = 1024;
-    const call = caller({ databases: { d: seeded() }, maxDtqlBytes: cap });
+    const call = caller({ databases: { d: seeded() }, maxTugqlBytes: cap });
     const head = "from: {name: users}\n#";
     const pad = (bytes: number): string => `${head}${"x".repeat(bytes - head.length)}`;
     expect((await call("POST", path, pad(cap))).status).toBe(200);
@@ -68,9 +68,9 @@ describe("DTQL document size cap (maxDtqlBytes), before any parsing", () => {
   });
 
   it("is bounded by maxBodyBytes when that is smaller, and leaves record bodies on maxBodyBytes", async () => {
-    const small = caller({ databases: { d: seeded() }, maxBodyBytes: 100, maxDtqlBytes: 5000 });
+    const small = caller({ databases: { d: seeded() }, maxBodyBytes: 100, maxTugqlBytes: 5000 });
     expect((await small("POST", path, `from: {name: users}\n#${"x".repeat(100)}`)).status).toBe(413);
-    const wide = caller({ databases: { d: seeded() }, maxDtqlBytes: 100 });
+    const wide = caller({ databases: { d: seeded() }, maxTugqlBytes: 100 });
     expect((await wide("PUT", "/v1/databases/d/records/users/c", { data: { pad: "x".repeat(5000) } })).status).toBe(204);
     expect((await wide("POST", path, `from: {name: users}\n#${"x".repeat(100)}`)).status).toBe(413);
   });
@@ -86,7 +86,7 @@ describe("nesting scan before parsing", () => {
         await timed(() => call("POST", path, { query: body }, jsonType)),
       ]) {
         if (answer.result.status === 413) continue; // the JSON envelope pushed it over the cap: refused even earlier
-        expect(answer.result).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+        expect(answer.result).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
         expect((answer.result.body as { error: { message: string } }).error.message).toContain("nesting too deep");
         expect(answer.ms).toBeLessThan(500);
       }
@@ -152,7 +152,7 @@ describe("nesting scan before parsing", () => {
     const deep = (levels: number): string => `a: ${"[".repeat(levels)}${"]".repeat(levels)}`;
     expect(nesting(deep(256))).toBeUndefined();
     const answer = await call("POST", path, deep(256));
-    expect(answer).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+    expect(answer).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     expect((answer.body as { error: { message: string } }).error.message).toContain("nesting too deep");
   });
 });
@@ -162,7 +162,7 @@ describe("YAML parser options", () => {
 
   it("does not process merge keys: << stays an ordinary, unsupported key", async () => {
     const answer = await call("POST", path, "from: {<<: &b {name: users}}\n");
-    expect(answer).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+    expect(answer).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
   });
 
   it("refuses custom and js tags instead of resolving them", async () => {
@@ -172,20 +172,20 @@ describe("YAML parser options", () => {
       "from: !!js/regexp {name: users}",
       "!!python/object:os.system {from: {name: users}}",
     ]) {
-      expect(await call("POST", path, document)).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+      expect(await call("POST", path, document)).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     }
   });
 
   it("refuses duplicate keys, and alias bombs fast", async () => {
-    expect(await call("POST", path, "from: {name: users}\nfrom: {name: users}")).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+    expect(await call("POST", path, "from: {name: users}\nfrom: {name: users}")).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     let bomb = "a: &a [x, x, x, x, x, x, x, x, x, x]\n";
     for (const [name, previous] of [["b", "a"], ["c", "b"], ["d", "c"], ["e", "d"], ["f", "e"], ["g", "f"], ["h", "g"]] as const) {
       bomb += `${name}: &${name} [${Array.from({ length: 10 }, () => `*${previous}`).join(", ")}]\n`;
     }
     const many = `from: {name: users}\nwhere: {and: [&w {op: ==, left: {field: name}, right: {value: Ann}}, ${Array.from({ length: 150 }, () => "*w").join(", ")}]}`;
-    expect(await call("POST", path, many)).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+    expect(await call("POST", path, many)).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     const { result, ms } = await timed(() => call("POST", path, bomb));
-    expect(result).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+    expect(result).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     expect(ms).toBeLessThan(500);
   });
 });
@@ -197,13 +197,13 @@ describe("a large but valid document at the cap", () => {
     const tail = "]}}\n";
     const values: string[] = [];
     let size = head.length + tail.length;
-    for (let index = 0; size + 8 < defaultMaxDtqlBytes; index += 1) {
+    for (let index = 0; size + 8 < defaultMaxTugqlBytes; index += 1) {
       const value = `v${index.toString()}, `;
       values.push(value);
       size += value.length;
     }
     const document = `${head}${values.join("")}Ann${tail}`;
-    expect(new TextEncoder().encode(document).length).toBeLessThanOrEqual(defaultMaxDtqlBytes);
+    expect(new TextEncoder().encode(document).length).toBeLessThanOrEqual(defaultMaxTugqlBytes);
     const { result, ms } = await timed(() => call("POST", path, document));
     // the values list exceeds the 1000-value parameter bound only for parameters; a document list is plain
     expect([200, 400, 422]).toContain(result.status);
@@ -211,13 +211,13 @@ describe("a large but valid document at the cap", () => {
   });
 });
 
-/** Fills a document up to the DTQL cap with repeated items. */
+/** Fills a document up to the TugQL cap with repeated items. */
 function filled(head: string, item: (index: number) => string, tail: string): string {
   const out: string[] = [];
   let size = head.length + tail.length;
   for (let index = 0; ; index += 1) {
     const text = item(index);
-    if (size + text.length > defaultMaxDtqlBytes) break;
+    if (size + text.length > defaultMaxTugqlBytes) break;
     out.push(text);
     size += text.length;
   }
@@ -234,11 +234,11 @@ describe("worst-case documents at the cap stay linear (the library's own duplica
     "same key with anchors": { text: filled("", (i) => `k: &a${i.toString()} 1\n`, ""), refused: true },
   };
   for (const [name, { text, refused }] of Object.entries(shapes)) {
-    it(`${name}: ${refused ? "refused as a duplicate" : "parsed, then refused as a DTQL document"} in under 3 s`, async () => {
-      expect(text.length).toBeGreaterThan(defaultMaxDtqlBytes - 64);
+    it(`${name}: ${refused ? "refused as a duplicate" : "parsed, then refused as a TugQL document"} in under 3 s`, async () => {
+      expect(text.length).toBeGreaterThan(defaultMaxTugqlBytes - 64);
       const call = caller({ databases: { d: seeded() } });
       const { result, ms } = await timed(() => call("POST", path, text));
-      expect(result).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+      expect(result).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
       if (refused) expect((result.body as { error: { message: string } }).error.message).toContain("duplicate key");
       // before the fix these took 9-39 s; now 0.1-0.8 s locally
       expect(ms).toBeLessThan(3000);
@@ -362,19 +362,19 @@ describe("the scanner's depth equals the parsed depth at the limit", () => {
 
 describe("size options are validated", () => {
   it("rejects NaN, negative, zero, fractional and infinite limits with a TypeError", () => {
-    for (const name of ["maxBodyBytes", "maxDtqlBytes"] as const) {
+    for (const name of ["maxBodyBytes", "maxTugqlBytes"] as const) {
       for (const bad of [Number.NaN, -1, 0, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
         expect(() => createOvdbFetch({ databases: {}, [name]: bad }), `${name}=${String(bad)}`).toThrow(TypeError);
       }
       expect(() => createOvdbFetch({ databases: {}, [name]: 1 })).not.toThrow();
     }
-    expect(() => createOvdbFetch({ databases: {}, maxDtqlBytes: Number.NaN })).toThrow(/maxDtqlBytes must be a positive safe integer/u);
+    expect(() => createOvdbFetch({ databases: {}, maxTugqlBytes: Number.NaN })).toThrow(/maxTugqlBytes must be a positive safe integer/u);
   });
 });
 
 describe("an over-limit body is cancelled, not drained", () => {
-  it("cancels the stream once the DTQL cap is passed", async () => {
-    const fetch = createOvdbFetch({ databases: { d: seeded() }, maxDtqlBytes: 100 });
+  it("cancels the stream once the TugQL cap is passed", async () => {
+    const fetch = createOvdbFetch({ databases: { d: seeded() }, maxTugqlBytes: 100 });
     let cancelled = 0;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

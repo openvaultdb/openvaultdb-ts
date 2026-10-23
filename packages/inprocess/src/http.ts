@@ -17,7 +17,7 @@ export class OvdbHttpError extends Error {
 
 export const badRequest = (message: string): OvdbHttpError => new OvdbHttpError(400, "bad_request", message);
 export const invalidKey = (message: string): OvdbHttpError => new OvdbHttpError(400, "invalid_key", message);
-export const invalidDtql = (message: string): OvdbHttpError => new OvdbHttpError(400, "invalid_dtql", message);
+export const invalidTugql = (message: string): OvdbHttpError => new OvdbHttpError(400, "invalid_tugql", message);
 export const notFound = (message: string): OvdbHttpError => new OvdbHttpError(404, "not_found", message);
 export const payloadTooLarge = (limit: number, what = "request body"): OvdbHttpError =>
   new OvdbHttpError(413, "payload_too_large", `${what} exceeds ${limit.toString()} bytes`);

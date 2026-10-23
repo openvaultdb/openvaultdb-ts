@@ -72,28 +72,28 @@ The routes, statuses, headers and error envelopes are those of `ovdb serve`
 | `GET`, `HEAD`, `PUT`, `POST`, `PATCH`, `DELETE /v1/databases/{db}/records/{key...}` | read, exists, set, insert, update, delete |
 | `POST /v1/databases/{db}/batch` | ops applied in order in one DALgo read-write transaction |
 | `POST`, `GET /v1/databases/{db}/query` | structured query of one collection |
-| `POST`, `GET /v1/databases/{db}/dtql` | DTQL document of one plain collection, with result snapshot paging |
+| `POST`, `GET /v1/databases/{db}/tugql` | TugQL document of one plain collection, with result snapshot paging |
 | `POST /v1/databases/{db}/reset` | restore a resettable database (in-process only) |
 
 DALgo errors are answered as the Go server answers them: `NotFoundError` is
 `404 not_found`, `AlreadyExistsError` is `409 already_exists`, a storage
 constraint the adapter refuses is `409 constraint_violation`, and
-`UnsupportedError` is `422 not_supported`. A relational DTQL document is
+`UnsupportedError` is `422 not_supported`. A relational TugQL document is
 `422 join_engine_unsupported`.
 
 Beyond the Go server's behaviour, this server also:
 
 - refuses a request body over `maxBodyBytes` (default 8 MiB) with
-  `413 payload_too_large`, while reading it, and a DTQL document over
-  `maxDtqlBytes` (default 256 KiB) the same way, before any YAML parsing, since
+  `413 payload_too_large`, while reading it, and a TugQL document over
+  `maxTugqlBytes` (default 256 KiB) the same way, before any YAML parsing, since
   the YAML library parses a whole document before its depth can be checked;
-- refuses a DTQL document nested deeper than 256 levels (flow or block style)
-  with `400 invalid_dtql` from a linear pre-parse scan, parses it with the core
+- refuses a TugQL document nested deeper than 256 levels (flow or block style)
+  with `400 invalid_tugql` from a linear pre-parse scan, parses it with the core
   schema only (no custom tags, merge keys or duplicate keys; duplicates are
   found in linear time) and refuses an unresolved or mismatched tag
-  (`!!js/function`, `!!float 1`); `maxBodyBytes` and `maxDtqlBytes` must be
+  (`!!js/function`, `!!float 1`); `maxBodyBytes` and `maxTugqlBytes` must be
   positive safe integers, else `createOvdbFetch` throws a `TypeError`;
-- answers `403 read_denied` for reads (record `GET`/`HEAD`, query, DTQL) of a
+- answers `403 read_denied` for reads (record `GET`/`HEAD`, query, TugQL) of a
   database whose capabilities say `read: false` (`ovdb serve` has no such
   denial, so the code is this server's own);
 - refuses field paths through `__proto__`, `constructor` or `prototype`, and

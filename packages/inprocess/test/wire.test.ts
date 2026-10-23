@@ -27,7 +27,7 @@ describe("api.md#authentication-optional-ovdb-serve---auth: GET /.well-known/ope
     expect(answer.headers.get("Cache-Control")).toBe("no-store");
     expect(answer.body).toMatchObject({
       name: "OpenVaultDB", protocol: "openvaultdb/0.1", authEnabled: false,
-      query: { format: "dtql-yaml+json", joinEngines: [] },
+      query: { format: "tugql-yaml+json", joinEngines: [] },
       databases: [
         { id: "alpha", url: `${base}/ovdb/dbs/alpha`, apiUrl: `${base}/v1/databases/alpha`,
           capabilities: { read: true, write: false, delete: false, joins: false, aggregation: false } },
@@ -39,7 +39,7 @@ describe("api.md#authentication-optional-ovdb-serve---auth: GET /.well-known/ope
 });
 
 describe("api.md#server--databases: GET /v1/databases/{db}", () => {
-  it("describes capabilities from capabilities(), with the DTQL endpoint when queries run", async () => {
+  it("describes capabilities from capabilities(), with the TugQL endpoint when queries run", async () => {
     const call = caller({ databases: { demo: new MapDatabase({ ...writable, persistent: true, joins: true }) } });
     expect(await call("GET", "/v1/databases/demo")).toEqual({
       status: 200,
@@ -47,11 +47,11 @@ describe("api.md#server--databases: GET /v1/databases/{db}", () => {
       body: {
         id: "demo", engine: "inprocess", schemaMode: "schemaless", collections: [],
         capabilities: {
-          read: true, query: true, dtql: true, dtqlStreaming: true, dtqlStreamingErrors: false,
+          read: true, query: true, tugql: true, tugqlStreaming: true, tugqlStreamingErrors: false,
           write: true, delete: true, reset: false, persistent: true, joins: false, aggregation: false,
         },
-        endpoints: { dtql: `${base}/v1/databases/demo/dtql` },
-        queryFormat: "dtql-yaml+json",
+        endpoints: { tugql: `${base}/v1/databases/demo/tugql` },
+        queryFormat: "tugql-yaml+json",
       },
     });
   });
@@ -68,7 +68,7 @@ describe("api.md#server--databases: GET /v1/databases/{db}", () => {
       localState: (id) => ({ modified: id === "demo" }),
     });
     const demo = (await call("GET", "/v1/databases/demo")).body as Record<string, unknown>;
-    expect(demo).toMatchObject({ capabilities: { reset: true, query: false, dtql: false }, canonical, localState: { modified: true } });
+    expect(demo).toMatchObject({ capabilities: { reset: true, query: false, tugql: false }, canonical, localState: { modified: true } });
     expect(demo).not.toHaveProperty("endpoints");
     const fixed = (await call("GET", "/v1/databases/fixed")).body as Record<string, unknown>;
     expect(fixed).not.toHaveProperty("canonical");
@@ -438,7 +438,7 @@ describe("createOvdbFetch never reaches the network", () => {
   it("serves a custom base URL with a path prefix and answers 404 outside it", async () => {
     const fetch = createOvdbFetch({ baseUrl: "http://127.0.0.1:6832/ovdb-local/", databases: { demo: seeded() } });
     const descriptor = await fetch("http://127.0.0.1:6832/ovdb-local/v1/databases/demo");
-    expect(await descriptor.json()).toMatchObject({ endpoints: { dtql: "http://127.0.0.1:6832/ovdb-local/v1/databases/demo/dtql" } });
+    expect(await descriptor.json()).toMatchObject({ endpoints: { tugql: "http://127.0.0.1:6832/ovdb-local/v1/databases/demo/tugql" } });
     expect((await fetch(new URL("http://127.0.0.1:6832/v1/databases/demo"))).status).toBe(404);
     const request = new Request("http://127.0.0.1:6832/ovdb-local/.well-known/openvaultdb");
     expect(await (await fetch(request)).json()).toMatchObject({ databases: [{ apiUrl: "http://127.0.0.1:6832/ovdb-local/v1/databases/demo" }] });

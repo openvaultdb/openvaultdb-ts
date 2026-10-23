@@ -190,18 +190,18 @@ describe("pathological nesting answers 400, not 500", () => {
     expect((await call("PATCH", records, { updates: [{ fieldPath: Array.from({ length: 256 }, () => "a"), value: 1 }] })).status).toBe(204);
   });
 
-  it("DTQL documents, as YAML and as JSON, GET and POST", async () => {
+  it("TugQL documents, as YAML and as JSON, GET and POST", async () => {
     const call = caller({ databases: { d: seeded() } });
     const yaml = (levels: number): string => `from: {name: users}\nwhere: ${'{and: ['.repeat(levels)}{left: {field: name}, op: ==, right: {value: Ann}}${"]}".repeat(levels)}`;
     for (const levels of [5_000, 300]) {
-      expect(await call("POST", "/v1/databases/d/dtql", yaml(levels))).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
-      expect(await call("POST", "/v1/databases/d/dtql", { query: yaml(levels) }, { "Content-Type": "application/json" }))
-        .toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+      expect(await call("POST", "/v1/databases/d/tugql", yaml(levels))).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
+      expect(await call("POST", "/v1/databases/d/tugql", { query: yaml(levels) }, { "Content-Type": "application/json" }))
+        .toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     }
     const flow = `from: {name: users}\nwhere: ${"[".repeat(5_000)}`;
-    expect((await call("POST", "/v1/databases/d/dtql", flow)).status).toBe(400);
+    expect((await call("POST", "/v1/databases/d/tugql", flow)).status).toBe(400);
     const nested = yaml;
-    expect((await call("POST", "/v1/databases/d/dtql", nested(100))).status).toBe(200);
+    expect((await call("POST", "/v1/databases/d/tugql", nested(100))).status).toBe(200);
   });
 });
 
@@ -223,7 +223,7 @@ describe("HEAD never carries a body and reports its own method", () => {
     expect(get.status).toBe(405);
     expect(get.headers.get("Allow")).toBe("POST");
     expect(((await get.json()) as { error: { message: string } }).error.message).toBe("method not allowed: GET");
-    const query = await fetch(`${base}/v1/databases/d/dtql`, { method: "DELETE" });
+    const query = await fetch(`${base}/v1/databases/d/tugql`, { method: "DELETE" });
     expect(query.headers.get("Allow")).toBe("GET, POST, HEAD");
     expect(((await query.json()) as { error: { message: string } }).error.message).toBe("method not allowed: DELETE");
     const wellKnown = await fetch(`${base}/.well-known/openvaultdb`, { method: "POST" });
@@ -253,7 +253,7 @@ describe("__proto__ is not a database id or a collection", () => {
       expect(await call("PUT", `/v1/databases/d/records/users/a/${collection}/b`, { data: {} })).toMatchObject({ status: 400 });
       expect(await call("POST", "/v1/databases/d/batch", { ops: [{ op: "set", key: `${collection}/a`, data: {} }] })).toMatchObject({ status: 400 });
       expect(await call("POST", "/v1/databases/d/query", { collection })).toMatchObject({ status: 400, body: refusal("invalid_key") });
-      expect(await call("POST", "/v1/databases/d/dtql", `from: {name: ${collection}}`)).toMatchObject({ status: 400 });
+      expect(await call("POST", "/v1/databases/d/tugql", `from: {name: ${collection}}`)).toMatchObject({ status: 400 });
     }
     expect(touched).toEqual([]);
     expect((await call("PUT", "/v1/databases/d/records/users/__proto__", { data: {} })).status).toBe(204);

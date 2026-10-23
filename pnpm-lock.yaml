@@ -5,8 +5,8 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@dalgo/core': github:dal-go/dalgo-js#24eb5b7ef8f044c274cb33beda353b2413e17c42
-  '@dalgo/ovdb': github:dal-go/dalgo-http-adapters#28bc59754f068335d08fb31c7aae5216b9f8bf56&path:/packages/ovdb
+  '@dalgo/core': github:dal-go/dalgo-js#99165e9e1a39c32abee2b39d6395677843bc3559
+  '@dalgo/ovdb': github:dal-go/dalgo-http-adapters#19684666326c9f03c2824f28040c4449277a2f7c&path:/packages/ovdb
 
 importers:
 
@@ -19,15 +19,15 @@ importers:
   packages/inprocess:
     dependencies:
       '@dalgo/core':
-        specifier: github:dal-go/dalgo-js#24eb5b7ef8f044c274cb33beda353b2413e17c42
-        version: https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42
+        specifier: github:dal-go/dalgo-js#99165e9e1a39c32abee2b39d6395677843bc3559
+        version: https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559
       yaml:
         specifier: 2.8.2
         version: 2.8.2
     devDependencies:
       '@dalgo/ovdb':
-        specifier: github:dal-go/dalgo-http-adapters#28bc59754f068335d08fb31c7aae5216b9f8bf56&path:/packages/ovdb
-        version: https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56#path:/packages/ovdb(@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42)
+        specifier: github:dal-go/dalgo-http-adapters#19684666326c9f03c2824f28040c4449277a2f7c&path:/packages/ovdb
+        version: https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/19684666326c9f03c2824f28040c4449277a2f7c#path:/packages/ovdb(@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559)
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@10.11.0)
@@ -148,17 +148,17 @@ packages:
     resolution: {integrity: sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ==}
     engines: {node: '>= 20.12.0'}
 
-  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42':
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42}
+  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559':
+    resolution: {gitHosted: true, integrity: sha512-4/mXXq+vUFYviUaGmxzlmUoxxCC02xnegJhnK+fI0EJ4aNv1b3y2XA+qCCNNOEW3yGwirs8ccf4/bamubjTOgg==, tarball: https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559}
     version: 0.7.4
     engines: {node: '>=20'}
 
-  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56#path:/packages/ovdb':
-    resolution: {gitHosted: true, integrity: sha512-/Q4TnEggAZKg/KYBgoggvnrQiPj1HiiEZeZQJ5BRIrK5xVZnmLNCNrlEpRMYG7/VUg18LgOzmgcsMdTWqbaYTw==, path: /packages/ovdb, tarball: https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56}
+  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/19684666326c9f03c2824f28040c4449277a2f7c#path:/packages/ovdb':
+    resolution: {gitHosted: true, integrity: sha512-AO/GY6NAJXAD36vGMqziQgEfG3+LxE9t+5dFacPlJkMjaAT5nMGy0AIuKF3Aw7xEyvOs7bTsybXtcVSlWJNXbg==, path: /packages/ovdb, tarball: https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/19684666326c9f03c2824f28040c4449277a2f7c}
     version: 0.2.0
     engines: {node: '>=20'}
     peerDependencies:
-      '@dalgo/core': '>=0.6.0 <0.9.0'
+      '@dalgo/core': '>=0.6.0 <0.8.0'
 
   '@eslint-community/eslint-utils@4.10.1':
     resolution: {integrity: sha512-cuadcxVFE8sDK6iWJbs8Sn0av2Nrh2QSGQhVlBW9AaAHqHwjWsZHT8LJ4hFGPh7ASBV2deFdM7H/DPjulmh8rg==}
@@ -1185,13 +1185,13 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
-  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42':
+  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559':
     dependencies:
-      yaml: 2.8.2
+      yaml: 2.9.1
 
-  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56#path:/packages/ovdb(@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42)':
+  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/19684666326c9f03c2824f28040c4449277a2f7c#path:/packages/ovdb(@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559)':
     dependencies:
-      '@dalgo/core': https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42
+      '@dalgo/core': https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559
       yaml: 2.8.2
 
   '@eslint-community/eslint-utils@4.10.1(eslint@10.11.0)':

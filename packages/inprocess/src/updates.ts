@@ -15,7 +15,7 @@ export interface WireUpdate {
 /** Keys that would reach Object.prototype or a constructor through a request-controlled path. */
 const dangerousSegments: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
 
-/** The deepest nesting of a record body, update value or DTQL document, and the longest field path. */
+/** The deepest nesting of a record body, update value or TugQL document, and the longest field path. */
 export const maxNesting = 256;
 
 /**

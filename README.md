@@ -1,5 +1,5 @@
 # openvaultdb-ts
-TypeScript SDK for [OpenVaultDB](https://openvaultdb.com/) — DTQL queries, schema management, authentication, and access to user-owned application databases.
+TypeScript SDK for [OpenVaultDB](https://openvaultdb.com/) — TugQL queries, schema management, authentication, and access to user-owned application databases.
 
 ## TypeScript SDK and DataTug session storage
 

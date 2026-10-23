@@ -3,7 +3,7 @@ import { MapDatabase, writable } from "./fake-database.js";
 import { createOvdbFetch } from "../src/index.js";
 import { base, caller, refusal, type Call } from "./helpers.js";
 
-const path = "/v1/databases/demo/dtql";
+const path = "/v1/databases/demo/tugql";
 
 function people(count = 5): MapDatabase {
   const records: Record<string, Record<string, unknown>> = {};
@@ -15,7 +15,7 @@ function people(count = 5): MapDatabase {
 
 const yaml = { "Content-Type": "application/yaml" };
 
-describe("api.md#dtql: POST|GET /v1/databases/{db}/dtql, a document of one plain collection", () => {
+describe("api.md#tugql: POST|GET /v1/databases/{db}/tugql, a document of one plain collection", () => {
   it("→ 200 {records, complete}: filters, ordering, limit, offset and field projection", async () => {
     const db = people();
     const call = caller({ databases: { demo: db } });
@@ -47,7 +47,7 @@ describe("api.md#dtql: POST|GET /v1/databases/{db}/dtql, a document of one plain
     expect(db.queries.at(-1)).toEqual({ source: { kind: "collection", name: "people" }, filters: [], orders: [], limit: 1000 });
   });
 
-  it("maps every DTQL operator to DALgo", async () => {
+  it("maps every TugQL operator to DALgo", async () => {
     const db = people();
     const call = caller({ databases: { demo: db } });
     for (const [op, operator, right] of [
@@ -103,9 +103,9 @@ describe("api.md#dtql: POST|GET /v1/databases/{db}/dtql, a document of one plain
     ["YAML that does not parse", "from: {name: people"],
   ];
   for (const [name, document] of invalid) {
-    it(`400 invalid_dtql for ${name}`, async () => {
+    it(`400 invalid_tugql for ${name}`, async () => {
       const call = caller({ databases: { demo: people() } });
-      expect(await call("POST", path, document)).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+      expect(await call("POST", path, document)).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     });
   }
 
@@ -156,7 +156,7 @@ describe("api.md#statuses: a relational document → 422 join_engine_unsupported
   }
 });
 
-describe("api.md#dtql: request forms and parameters", () => {
+describe("api.md#tugql: request forms and parameters", () => {
   const post = (call: Call, body: unknown) => call("POST", path, body, { "Content-Type": "application/json" });
   const query = "from: {name: people}\nwhere: {op: '==', left: {field: city}, right: {param: City}}";
 
@@ -176,9 +176,9 @@ describe("api.md#dtql: request forms and parameters", () => {
     ["query YAML that does not parse", { query: "from: [", parameters: {} }],
   ];
   for (const [name, body] of invalid) {
-    it(`POST JSON: 400 invalid_dtql for ${name}`, async () => {
+    it(`POST JSON: 400 invalid_tugql for ${name}`, async () => {
       const call = caller({ databases: { demo: people() } });
-      expect(await post(call, body)).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+      expect(await post(call, body)).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     });
   }
 
@@ -189,7 +189,7 @@ describe("api.md#dtql: request forms and parameters", () => {
     expect(await post(call, { query: nested, parameters: { Ages: [10, 20] } })).toMatchObject({ status: 200, body: { records: [{ key: "people/p1" }, { key: "people/p2" }] } });
   });
 
-  it("POST: a body without a Content-Type is read as DTQL YAML", async () => {
+  it("POST: a body without a Content-Type is read as TugQL YAML", async () => {
     const fetch = createOvdbFetch({ databases: { demo: people(1) } });
     const response = await fetch(`${base}${path}`, { method: "POST", body: new TextEncoder().encode("from: {name: people}") });
     expect(await response.json()).toMatchObject({ records: [{ key: "people/p1" }] });
@@ -214,7 +214,7 @@ describe("api.md#dtql: request forms and parameters", () => {
   });
 });
 
-describe("api.md#dtql: result snapshot paging", () => {
+describe("api.md#tugql: result snapshot paging", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -250,8 +250,8 @@ describe("api.md#dtql: result snapshot paging", () => {
     for (const headers of [paging("0"), paging("1001"), paging("x"), { "OVDB-Page-Token": "t" }, paging("2", { "OVDB-Page-Close": "yes" }), paging("2", { "OVDB-Page-Close": "true" })]) {
       expect(await call("POST", path, document, headers)).toMatchObject({ status: 400, body: refusal("bad_request") });
     }
-    expect(await call("POST", path, `${document}\nlimit: 3`, paging("2"))).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
-    expect(await call("POST", path, `${document}\noffset: 3`, paging("2"))).toMatchObject({ status: 400, body: refusal("invalid_dtql") });
+    expect(await call("POST", path, `${document}\nlimit: 3`, paging("2"))).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
+    expect(await call("POST", path, `${document}\noffset: 3`, paging("2"))).toMatchObject({ status: 400, body: refusal("invalid_tugql") });
     expect(await call("POST", path, document, paging("2", { "OVDB-Page-Token": "bad", "OVDB-Page-Close": "true" })))
       .toMatchObject({ status: 400, body: refusal("invalid_page_token") });
     expect(await call("POST", path, document, paging("2", { "OVDB-Page-Token": `${"A".repeat(43)}.0`, "OVDB-Page-Close": "true" })))
@@ -264,7 +264,7 @@ describe("api.md#dtql: result snapshot paging", () => {
     const first = await call("POST", path, document, paging("2", { Authorization: "Bearer a" }));
     const { nextPageToken, snapshotToken } = first.body as { nextPageToken: string; snapshotToken: string };
     const at = (extra: Record<string, string>, target = path, body = document) => call("POST", target, body, paging("2", { "OVDB-Page-Token": nextPageToken, Authorization: "Bearer a", ...extra }));
-    expect(await at({}, "/v1/databases/other/dtql")).toMatchObject({ status: 403, body: refusal("forbidden") });
+    expect(await at({}, "/v1/databases/other/tugql")).toMatchObject({ status: 403, body: refusal("forbidden") });
     expect(await at({ Authorization: "Bearer b" })).toMatchObject({ status: 403, body: refusal("forbidden") });
     expect(await at({}, path, "from: {name: people}")).toMatchObject({ status: 400, body: refusal("bad_request") });
     expect(await call("POST", path, document, paging("3", { "OVDB-Page-Token": nextPageToken, Authorization: "Bearer a" })))

@@ -2,7 +2,7 @@ export {
   createOvdbFetch,
   defaultBaseUrl,
   defaultMaxBodyBytes,
-  defaultMaxDtqlBytes,
+  defaultMaxTugqlBytes,
   type CanonicalSource,
   type CreateOvdbFetchOptions,
   type LocalState,

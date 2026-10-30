@@ -1,1 +1,1 @@
-export { OpenVaultDbDatabase, OpenVaultDbHttpError } from "@dalgo/ovdb/client";
+export { OpenVaultDbDatabase, OpenVaultDbHttpError } from "./fixtures/ovdb-client/index.js";

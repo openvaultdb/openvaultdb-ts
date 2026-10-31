@@ -47,9 +47,33 @@ jobs:
             git push --force origin HEAD:refs/heads/changeset-release/main
             pr=$(gh pr list --base main --head changeset-release/main --state open --json number --jq '.[0].number // empty')
             if [[ -z "$pr" ]]; then
-              gh pr create --base main --head changeset-release/main \
+              create_error=$(mktemp)
+              trap 'rm -f "$create_error"' EXIT
+              manual_pr=false
+              if gh pr create --base main --head changeset-release/main \
                 --title 'chore: version packages' \
-                --body 'Automated Changesets version pull request.'
+                --body 'Automated Changesets version pull request.' 2>"$create_error"; then
+                :
+              elif grep -Fq 'GitHub Actions is not permitted to create or approve pull requests' "$create_error"; then
+                manual_pr=true
+              else
+                cat "$create_error" >&2
+                exit 1
+              fi
+              pr=$(gh pr list --base main --head changeset-release/main --state open --json number --jq '.[0].number // empty')
+              if [[ -z "$pr" && "$manual_pr" != true ]]; then
+                echo 'Version pull request creation did not produce an open pull request.' >&2
+                exit 1
+              fi
+              if [[ -z "$pr" ]]; then
+                echo '::warning::The generated version branch needs a maintainer-created pull request; Actions PR creation is disabled.'
+                {
+                  echo '### Generated version branch awaits a maintainer'
+                  echo "Exact commit: $(git rev-parse HEAD)"
+                  echo "Compare: https://github.com/$GITHUB_REPOSITORY/compare/main...changeset-release/main"
+                  echo 'No package was published by this handoff.'
+                } >> "$GITHUB_STEP_SUMMARY"
+              fi
             fi
             exit 0
           fi

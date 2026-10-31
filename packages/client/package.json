@@ -1,6 +1,6 @@
 {
   "name": "@openvaultdb/client",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "OpenVaultDB HTTP CRUD client implementing DALgo database contracts",
   "type": "module",
   "sideEffects": false,

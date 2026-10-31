@@ -1,1 +1,1 @@
-export { OpenVaultDbDatabase, OpenVaultDbHttpError } from "./fixtures/ovdb-client/index.js";
+export { OpenVaultDbDatabase, OpenVaultDbHttpError } from "@openvaultdb/client";

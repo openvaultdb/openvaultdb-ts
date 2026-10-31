@@ -30,12 +30,9 @@ in-process package is published, install it with a supported core version:
 pnpm add @openvaultdb/inprocess @dalgo/core@0.8.1
 ```
 
-The registry `@dalgo/ovdb` package is query-only; it does not export the unreleased
-CRUD client at `@dalgo/ovdb/client`. This server does not depend on that package.
-Its HTTP contract tests run the real existing CRUD client from a checked-in
-[test-only fixture](https://github.com/openvaultdb/openvaultdb-ts/tree/main/packages/inprocess/test/fixtures/ovdb-client), with exact upstream
-commit and SHA-256 provenance and the original MIT license. That fixture is not
-included in the published server package or offered as a published client SDK.
+The server contract tests use the separate `@openvaultdb/client` workspace
+package. Its MIT-licensed source and tests retain their upstream provenance;
+the server's runtime dependencies do not include the client or `@dalgo/ovdb`.
 
 ## Capabilities
 

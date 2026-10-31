@@ -20,7 +20,7 @@ function connect(db: MapDatabase, databaseId = "demo"): OpenVaultDbDatabase {
   });
 }
 
-describe("@dalgo/ovdb client against createOvdbFetch", () => {
+describe("@openvaultdb/client against createOvdbFetch", () => {
   it("api.md#records: GET reads a record and a 404 is a missing snapshot", async () => {
     const client = connect(new MapDatabase(undefined, { "users/ann": { name: "Ann", age: 30 } }));
     const ann = await client.get<User>(users.key("ann"));

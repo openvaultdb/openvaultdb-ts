@@ -1,0 +1,48 @@
+{
+  "repository": "https://github.com/dal-go/dalgo-http-adapters",
+  "commit": "af8218ae07e752be25b65853a0819e2f9c7b7ed9",
+  "license": "MIT",
+  "purpose": "Existing CRUD client relocated to its own published package without behaviour changes.",
+  "files": [
+    {
+      "file": "src/client.ts",
+      "upstreamPath": "packages/ovdb/src/client.ts",
+      "sha256": "07ef30795874a00bc31ee0828b4a1d8a542858e437f883fff2a3141511784208"
+    },
+    {
+      "file": "src/database.ts",
+      "upstreamPath": "packages/ovdb/src/database.ts",
+      "sha256": "6fe12e24e9e06d804cae98162fd276e4f03113091ad0834b0d5aa6651f0a15ee"
+    },
+    {
+      "file": "src/query.ts",
+      "upstreamPath": "packages/ovdb/src/query.ts",
+      "sha256": "96fa21e648ab1eaf306385b513345768dae978bbe2df83338e9b3f3c451b3c77"
+    },
+    {
+      "file": "src/path.ts",
+      "upstreamPath": "packages/ovdb/src/path.ts",
+      "sha256": "c98d9bf5a75929b2cbc89c6c1edfb85a639967d2eac31f1460aa73469cc9ab6a"
+    },
+    {
+      "file": "src/index.ts",
+      "upstreamPath": "packages/ovdb/src/index.ts",
+      "sha256": "d10643f399e9d9e0ecded7d0acb58ee03c905c7a6a2547610a2244df6685610f"
+    },
+    {
+      "file": "test/database.test.ts",
+      "upstreamPath": "packages/ovdb/test/database.test.ts",
+      "sha256": "825f59dff3c3bb786767f34e58025d67a0837262211f76182de920c239b063a2"
+    },
+    {
+      "file": "test/path.test.ts",
+      "upstreamPath": "packages/ovdb/test/path.test.ts",
+      "sha256": "e552c9b65f577421278e38f0d82bbc4dc17b504e38a3a6bcb5720c82c546789d"
+    },
+    {
+      "file": "test/provider-reads.test.ts",
+      "upstreamPath": "packages/ovdb/test/provider-reads.test.ts",
+      "sha256": "9db37565a50b2658d5abfedb082c59735c0d10e521676ef2cacf125596b15691"
+    }
+  ]
+}

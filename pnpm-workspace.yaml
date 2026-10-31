@@ -1,13 +1,9 @@
 packages:
   - "packages/*"
 
-# Unreleased upstream builds, pinned to landed commits (no sibling links, so CI
-# resolves them). Drop each override once the package is published.
+# Exact registry versions required by the contract tests.
 overrides:
-  "@dalgo/core": "github:dal-go/dalgo-js#99165e9e1a39c32abee2b39d6395677843bc3559"
-  "@dalgo/ovdb": "github:dal-go/dalgo-http-adapters#19684666326c9f03c2824f28040c4449277a2f7c&path:/packages/ovdb"
+  "@dalgo/core": "0.8.1"
 
-# The GitHub tarballs build themselves on install (prepack).
-allowBuilds:
-  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/99165e9e1a39c32abee2b39d6395677843bc3559': true
-  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/19684666326c9f03c2824f28040c4449277a2f7c#path:/packages/ovdb': true
+minimumReleaseAgeExclude:
+  - '@dalgo/core@0.8.1'

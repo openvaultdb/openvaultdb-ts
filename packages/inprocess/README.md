@@ -1,7 +1,7 @@
 # @openvaultdb/inprocess
 
 An in-process OpenVaultDB server exposed as a standard `fetch`. Any OVDB HTTP
-client, such as the `@dalgo/ovdb` client, can read and write a local DALgo
+client can read and write a local DALgo
 database through it with no network, for example a SQLite database running in
 the browser.
 
@@ -22,27 +22,20 @@ origin is rejected, so the fetch never reaches the network.
 Requires `@dalgo/core` `>=0.7.4 <0.9.0` as a peer. The supported package
 manager is pnpm 11; npm is not supported. This package is released through the
 changesets workflow of this repository, so it is on npm only once a release has
-been published. `@dalgo/core` with the capabilities types, and the `@dalgo/ovdb`
-CRUD client used by this repository's tests (`@dalgo/ovdb/client`), are not yet
-published, so this repository and any consumer of unreleased builds pin them
-from GitHub:
+been published. Core `0.8.1`, including the capabilities types, is published to
+npm and is the exact development dependency used by this repository. After the
+in-process package is published, install it with a supported core version:
 
-```jsonc
-// package.json
-"@dalgo/core": "github:dal-go/dalgo-js#24eb5b7ef8f044c274cb33beda353b2413e17c42",
-"@dalgo/ovdb": "github:dal-go/dalgo-http-adapters#28bc59754f068335d08fb31c7aae5216b9f8bf56&path:/packages/ovdb"
+```sh
+pnpm add @openvaultdb/inprocess @dalgo/core@0.8.1
 ```
 
-```yaml
-# pnpm-workspace.yaml: the GitHub tarballs build themselves on install
-allowBuilds:
-  '@dalgo/core@https://codeload.github.com/dal-go/dalgo-js/tar.gz/24eb5b7ef8f044c274cb33beda353b2413e17c42': true
-  '@dalgo/ovdb@https://codeload.github.com/dal-go/dalgo-http-adapters/tar.gz/28bc59754f068335d08fb31c7aae5216b9f8bf56#path:/packages/ovdb': true
-```
-
-pnpm records no integrity hash for a GitHub tarball, so these pins are
-trusted by their full commit SHA and the HTTPS download alone. That is
-accepted until both packages are published to npm, when the pins go.
+The registry `@dalgo/ovdb` package is query-only; it does not export the unreleased
+CRUD client at `@dalgo/ovdb/client`. This server does not depend on that package.
+Its HTTP contract tests run the real existing CRUD client from a checked-in
+[test-only fixture](https://github.com/openvaultdb/openvaultdb-ts/tree/main/packages/inprocess/test/fixtures/ovdb-client), with exact upstream
+commit and SHA-256 provenance and the original MIT license. That fixture is not
+included in the published server package or offered as a published client SDK.
 
 ## Capabilities
 
